@@ -1,5 +1,6 @@
 package br.com.tavares.bedfight.arena;
 
+import java.util.HashSet;
 import java.util.Set;
 import net.minecraft.core.BlockPos;
 
@@ -8,7 +9,7 @@ public final class ArenaInstance {
 	private final BlockPos origin;
 	private boolean inUse;
 	private String mapId;
-	private Set<BlockPos> protectedBlocks = Set.of();
+	private final Set<BlockPos> breakableBlocks = new HashSet<>();
 
 	ArenaInstance(int index, BlockPos origin) {
 		this.index = index;
@@ -31,20 +32,26 @@ public final class ArenaInstance {
 		return mapId;
 	}
 
-	/** Positions that may currently be broken (bed + its wood shell + its end-stone shell), from the last paste. */
-	public Set<BlockPos> protectedBlocks() {
-		return protectedBlocks;
+	/** True for the bed/wood/end-stone shell from the last paste, plus anything a player has placed since. */
+	public boolean isBreakable(BlockPos pos) {
+		return breakableBlocks.contains(pos);
 	}
 
-	void occupy(String mapId, Set<BlockPos> protectedBlocks) {
+	/** Called when a player places a block inside this instance - their own bridge stays breakable by them. */
+	public void markPlaced(BlockPos pos) {
+		breakableBlocks.add(pos.immutable());
+	}
+
+	void occupy(String mapId, Set<BlockPos> initialBreakable) {
 		this.mapId = mapId;
 		this.inUse = true;
-		this.protectedBlocks = protectedBlocks;
+		this.breakableBlocks.clear();
+		this.breakableBlocks.addAll(initialBreakable);
 	}
 
 	void free() {
 		this.mapId = null;
 		this.inUse = false;
-		this.protectedBlocks = Set.of();
+		this.breakableBlocks.clear();
 	}
 }

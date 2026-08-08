@@ -1,0 +1,12 @@
+{
+	"required": true,
+	"package": "br.com.tavares.bedfight.mixin",
+	"compatibilityLevel": "JAVA_25",
+	"mixins": [
+		"BlockPlaceTrackingMixin",
+		"OldPvpAttackStrengthMixin"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	}
+}

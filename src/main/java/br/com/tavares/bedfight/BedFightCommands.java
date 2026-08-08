@@ -5,6 +5,7 @@ import br.com.tavares.bedfight.arena.ArenaInstance;
 import br.com.tavares.bedfight.arena.ArenaInstancePool;
 import br.com.tavares.bedfight.arena.ArenaInstanceService;
 import br.com.tavares.bedfight.arena.ArenaSpawn;
+import br.com.tavares.bedfight.arena.BedProtectionScanner;
 import br.com.tavares.bedfight.arena.MapCaptureException;
 import br.com.tavares.bedfight.arena.MapCaptureService;
 import br.com.tavares.bedfight.arena.MapSelection;
@@ -59,6 +60,9 @@ public final class BedFightCommands {
 					.then(argument("instancia", IntegerArgumentType.integer(0))
 						.then(argument("mapId", StringArgumentType.word())
 							.executes(BedFightCommands::testArena))))
+				.then(literal("freearena")
+					.then(argument("instancia", IntegerArgumentType.integer(0))
+						.executes(BedFightCommands::freeArena)))
 				.then(literal("testkit")
 					.executes(BedFightCommands::testKit))));
 	}
@@ -127,17 +131,38 @@ public final class BedFightCommands {
 			return 0;
 		}
 
+		BedProtectionScanner.Result scan;
 		try {
-			ArenaInstanceService.paste(arenaLevel, instance.get(), mapId);
+			scan = ArenaInstanceService.paste(arenaLevel, instance.get(), mapId);
+		} catch (MapCaptureException exception) {
+			context.getSource().sendFailure(Component.literal(exception.getMessage()).withStyle(ChatFormatting.RED));
+			return 0;
 		} catch (IOException exception) {
 			BedFight.LOGGER.error("Falha ao colar o mapa {} na instancia {}.", mapId, index, exception);
 			context.getSource().sendFailure(Component.literal("Falha ao colar o mapa, veja o console.").withStyle(ChatFormatting.RED));
 			return 0;
 		}
 
-		ArenaSpawn spawn = ArenaInstanceService.teamSpawn(instance.get(), mapId, Team.AZUL);
-		player.teleportTo(arenaLevel, spawn.x(), spawn.y(), spawn.z(), Set.of(), spawn.yaw(), spawn.pitch(), false);
-		context.getSource().sendSuccess(() -> Component.literal("Mapa " + mapId + " colado na instancia " + index + ".").withStyle(ChatFormatting.GREEN), false);
+		Optional<ArenaSpawn> spawn = ArenaInstanceService.teamSpawn(instance.get(), mapId, Team.AZUL);
+		if (spawn.isEmpty()) {
+			context.getSource().sendFailure(Component.literal("Mapa " + mapId + " colado, mas nao tem spawn do time azul definido.").withStyle(ChatFormatting.RED));
+			return 0;
+		}
+		player.teleportTo(arenaLevel, spawn.get().x(), spawn.get().y(), spawn.get().z(), Set.of(), spawn.get().yaw(), spawn.get().pitch(), false);
+		context.getSource().sendSuccess(() -> Component.literal("Mapa " + mapId + " colado na instancia " + index + " ("
+			+ scan.bedCount() + " cama(s), " + scan.woodCount() + " madeira, " + scan.endStoneCount() + " end stone).").withStyle(ChatFormatting.GREEN), false);
+		return 1;
+	}
+
+	private static int freeArena(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+		int index = IntegerArgumentType.getInteger(context, "instancia");
+		Optional<ArenaInstance> instance = ArenaInstancePool.byIndex(index);
+		if (instance.isEmpty()) {
+			context.getSource().sendFailure(Component.literal("Instancia " + index + " nao existe.").withStyle(ChatFormatting.RED));
+			return 0;
+		}
+		ArenaInstanceService.free(instance.get());
+		context.getSource().sendSuccess(() -> Component.literal("Instancia " + index + " liberada.").withStyle(ChatFormatting.GREEN), false);
 		return 1;
 	}
 

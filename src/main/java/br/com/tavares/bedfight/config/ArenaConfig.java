@@ -3,7 +3,6 @@ package br.com.tavares.bedfight.config;
 public final class ArenaConfig {
 	private static ArenaConfig instance = new ArenaConfig();
 
-	public String dimension = "bedfight:arena";
 	public int instancePoolSize = 4;
 	public int gridSpacingBlocks = 1000;
 

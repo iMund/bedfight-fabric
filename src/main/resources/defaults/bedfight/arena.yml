@@ -1,8 +1,6 @@
 # Configuracao das instancias de arena do Bed Fight.
-
-# Identificador da dimensao dedicada onde as instancias de arena vivem
-# (separada do overworld de sobrevivencia).
-dimension: "bedfight:arena"
+# A dimensao dedicada em si (bedfight:arena) nao e configuravel aqui - e um
+# datapack embutido no mod (data/bedfight/dimension/arena.json).
 
 # Quantas partidas podem rodar ao mesmo tempo, cada uma na sua propria instancia.
 # Se todas estiverem ocupadas quando uma fila enche, os jogadores continuam
