@@ -3,11 +3,11 @@
 	"id": "bedfight",
 	"version": "${version}",
 	"name": "bedfight",
-	"description": "Minigame Bed Fight (1v1/2v2) para o servidor UBMC.",
+	"description": "Bed Fight — duelo de cama 1v1/2v2. Sem grana, sem loja, só ilha, cama e porrada.",
 	"authors": [
 		"Tavares"
 	],
-	"license": "CC0-1.0",
+	"license": "MIT",
 	"environment": "*",
 	"entrypoints": {
 		"main": [
