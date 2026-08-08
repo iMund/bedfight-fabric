@@ -29,7 +29,8 @@ Bed Fight - minigame 1v1 e 2v2. Mod Fabric.
 - `/bedfight admin wand` entrega a varinha (machado dourado renomeado — mesma convenção do WorldEdit):
   clique esquerdo marca o canto 1, clique direito marca o canto 2, sem quebrar/interagir de verdade
   com o bloco.
-- Instâncias vivem numa **dimensão dedicada** (fora do overworld de sobrevivência). Cada instância =
+- Instâncias vivem numa **dimensão dedicada** (`bedfight:arena`, void/flat, registrada via datapack
+  embutido no mod — sem geração de terreno, já que todo cenário vem dos mapas colados). Cada instância =
   o template de um mapa colado (`StructureTemplate.placeInWorld`) num offset de grid (ex: instância N
   em `x = N * 1000`). O pool de arenas escolhe um mapa (aleatório/rotação) entre os cadastrados por
   partida.
@@ -87,9 +88,7 @@ dentro da dimensão da arena, via mixin — ainda não implementado.
 
 - Como a alocação de instância se conecta com a fila no código (mensagem de espera quando todas as 4
   instâncias estão ocupadas).
-- Dimensão dedicada da arena ainda não registrada — o `dimension` do `arena.yml` aponta pra um id que
-  ainda não existe.
-- Pool de instâncias (colar/resetar o `structure.nbt` capturado em cada slot do grid) ainda não
-  implementado — hoje só é possível capturar um mapa, não jogar nele.
+- Pool de instâncias (colar/resetar o `structure.nbt` capturado em cada slot do grid da dimensão
+  `bedfight:arena`) ainda não implementado — hoje só é possível capturar um mapa, não jogar nele.
 - PvP estilo 1.8 (ver acima), fila, GUI, lógica de cama, kit-on-join e o resto do fluxo de partida
   ainda não implementados.
