@@ -59,9 +59,25 @@ Bed Fight - minigame 1v1 e 2v2. Mod Fabric.
    fila pra jogar outra partida). Se não fizer nenhuma das duas opções em até **3 segundos**, é
    levado automaticamente pro lobby.
 
+## Configuração
+
+Tudo em YAML (comentado, editável à mão), em `config/bedfight/` na pasta do servidor:
+
+- `arena.yml` — dimensão dedicada, tamanho do pool de instâncias, espaçamento do grid.
+- `kit.yml` — lista do kit fixo (item, quantidade, encantamentos opcionais).
+- `match.yml` — tempos da partida (contagem regressiva, delay de respawn, janela de escolha no fim).
+- `maps/<mapId>/` *(ainda não implementado)* — cada mapa cadastrado terá sua própria pasta com
+  `map.yml` (offsets/yaw de spawn de cada time) e `structure.nbt` (a estrutura capturada).
+
+Um arquivo só é escrito a partir do default embutido no mod se ainda não existir em disco — o mod
+nunca sobrescreve uma config já editada. `./gradlew runServer` gera os arquivos automaticamente na
+primeira execução.
+
 ## Em aberto
 
 - Como a alocação de instância se conecta com a fila no código (mensagem de espera quando todas as 4
   instâncias estão ocupadas).
-- Nenhum código de gameplay ainda existe (fila, GUI, pool de arenas, lógica de cama, kit, fluxo de
-  partida acima) — só o scaffold vazio do mod.
+- Captura de mapa (item varinha, comandos admin `setspawn`/`capturar`, `maps/<mapId>/`) ainda não
+  implementada.
+- Fila, GUI, pool de arenas, lógica de cama, kit-on-join e fluxo de partida ainda não implementados —
+  só existe o scaffold do mod e o sistema de config (`arena.yml`, `kit.yml`, `match.yml`).

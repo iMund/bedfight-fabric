@@ -1,0 +1,31 @@
+# Kit fixo entregue a todos os jogadores assim que a partida comeca (todo
+# mundo recebe o mesmo, nao ha escolha de kit).
+#
+# Cada entrada:
+#   item: id do item, no formato "namespace:id" (ex: minecraft:wooden_sword)
+#   count: quantidade
+#   enchantments: opcional, mapa de "namespace:id_do_encantamento": nivel
+
+items:
+  - item: minecraft:leather_helmet
+    count: 1
+  - item: minecraft:leather_chestplate
+    count: 1
+  - item: minecraft:leather_leggings
+    count: 1
+  - item: minecraft:leather_boots
+    count: 1
+  - item: minecraft:wooden_sword
+    count: 1
+  - item: minecraft:white_wool
+    count: 64
+  - item: minecraft:shears
+    count: 1
+  - item: minecraft:wooden_pickaxe
+    count: 1
+    enchantments:
+      minecraft:efficiency: 1
+  - item: minecraft:wooden_axe
+    count: 1
+    enchantments:
+      minecraft:efficiency: 1

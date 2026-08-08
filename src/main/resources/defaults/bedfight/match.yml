@@ -1,0 +1,14 @@
+# Tempos do fluxo de uma partida de Bed Fight, em segundos.
+
+# Contagem regressiva depois que a fila enche e o kit e entregue. Durante esse
+# tempo os jogadores ficam congelados: sem mover, sem colocar bloco, sem PvP.
+countdownSeconds: 5
+
+# Quanto tempo em modo espectador depois de morrer com a propria cama ainda viva,
+# antes de respawnar de novo com o kit padrao.
+respawnDelaySeconds: 3
+
+# Ao fim da partida, quanto tempo o jogador tem pra clicar na cama (voltar ao
+# lobby) ou no papel (entrar na fila de novo) antes de ser levado automaticamente
+# para o lobby.
+endMatchChoiceSeconds: 3

@@ -1,0 +1,15 @@
+# Configuracao das instancias de arena do Bed Fight.
+
+# Identificador da dimensao dedicada onde as instancias de arena vivem
+# (separada do overworld de sobrevivencia).
+dimension: "bedfight:arena"
+
+# Quantas partidas podem rodar ao mesmo tempo, cada uma na sua propria instancia.
+# Se todas estiverem ocupadas quando uma fila enche, os jogadores continuam
+# esperando na fila ate uma instancia liberar.
+instancePoolSize: 4
+
+# Distancia em blocos entre uma instancia e outra dentro do grid da dimensao.
+# Precisa ser maior que o tamanho do maior mapa cadastrado, senao uma instancia
+# pode invadir a area da vizinha.
+gridSpacingBlocks: 1000
