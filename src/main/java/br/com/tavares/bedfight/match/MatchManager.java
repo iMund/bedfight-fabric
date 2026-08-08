@@ -21,14 +21,18 @@ import java.util.Optional;
 import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.minecraft.ChatFormatting;
+import net.minecraft.core.Holder;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.ai.attributes.Attribute;
+import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 
@@ -45,7 +49,13 @@ public final class MatchManager {
 	private static final long JOIN_COOLDOWN_MILLIS = 3000;
 	private static final int QUEUE_DRAIN_INTERVAL_TICKS = 100;
 	private static final int TICKS_PER_SECOND = 20;
+	private static final int MIN_COUNTDOWN_SECONDS = 1;
+	private static final int MAX_COUNTDOWN_SECONDS = 60;
+	/** Attribute modifiers can't stop a modified client from sending movement packets - this is only the visible/UX half of the freeze, the per-tick position reassert below is the real enforcement. */
 	private static final Identifier FREEZE_MODIFIER_ID = Identifier.fromNamespaceAndPath(BedFight.MOD_ID, "countdown_freeze");
+	private static final double FREEZE_SPEED_PENALTY = -1024.0;
+	/** How far a frozen player can drift from their spawn (teammates overlapping and pushing each other) before getting snapped back. */
+	private static final double FREEZE_DRIFT_TOLERANCE = 1.5;
 
 	private static final Map<GameMode, MatchQueue> QUEUES = new EnumMap<>(GameMode.class);
 	private static final List<Match> MATCHES = new ArrayList<>();
@@ -72,6 +82,13 @@ public final class MatchManager {
 			server.execute(() -> onDisconnect(playerId));
 		});
 		ServerTickEvents.END_SERVER_TICK.register(MatchManager::onServerTick);
+		ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
+			MATCHES.clear();
+			PLAYER_MATCH.clear();
+			LAST_JOIN_ATTEMPT.clear();
+			QUEUES.values().forEach(queue -> new ArrayList<>(queue.waiting()).forEach(queue::leave));
+			tickCounter = 0;
+		});
 	}
 
 	public static JoinResult join(ServerPlayer player, GameMode mode, MinecraftServer server) {
@@ -160,14 +177,20 @@ public final class MatchManager {
 	private static void startCountdown(Match match) {
 		match.state = Match.State.COUNTDOWN;
 		match.ticksInState = 0;
+		int seconds = Math.clamp(MatchConfig.get().countdownSeconds, MIN_COUNTDOWN_SECONDS, MAX_COUNTDOWN_SECONDS);
+		match.countdownTicks = seconds * TICKS_PER_SECOND;
 		for (UUID playerId : match.allPlayers()) {
 			ServerPlayer player = match.arenaLevel.getServer().getPlayerList().getPlayer(playerId);
 			if (player == null) {
+				BedFight.LOGGER.warn("Jogador {} sumiu da lista antes do kit/congelamento da partida.", playerId);
 				continue;
 			}
-			KitService.giveKit(player);
+			KitService.Result kitResult = KitService.giveKit(player);
+			if (!kitResult.isComplete()) {
+				BedFight.LOGGER.warn("Kit incompleto pra {} no inicio da partida: {}", playerId, kitResult.failures());
+			}
 			freeze(player);
-			player.sendSystemMessage(Component.literal("Partida comecando em " + MatchConfig.get().countdownSeconds + "s...").withStyle(ChatFormatting.GOLD));
+			player.sendSystemMessage(Component.literal("Partida comecando em " + seconds + "s...").withStyle(ChatFormatting.GOLD));
 		}
 	}
 
@@ -184,17 +207,40 @@ public final class MatchManager {
 		}
 	}
 
-	private static void freeze(ServerPlayer player) {
-		var movementSpeed = player.getAttribute(Attributes.MOVEMENT_SPEED);
-		if (movementSpeed != null && !movementSpeed.hasModifier(FREEZE_MODIFIER_ID)) {
-			movementSpeed.addTransientModifier(new AttributeModifier(FREEZE_MODIFIER_ID, -1.0, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL));
+	/** A disconnect mid-countdown leaves the match short-handed with no way to ever refill it (findFormingMatch only matches WAITING_FOR_PLAYERS) - revert instead of leaving it stuck forever. */
+	private static void revertToWaiting(Match match) {
+		match.state = Match.State.WAITING_FOR_PLAYERS;
+		match.ticksInState = 0;
+		for (UUID playerId : match.allPlayers()) {
+			ServerPlayer player = match.arenaLevel.getServer().getPlayerList().getPlayer(playerId);
+			if (player != null) {
+				unfreeze(player);
+				player.sendSystemMessage(Component.literal("Um jogador saiu, esperando completar de novo...").withStyle(ChatFormatting.YELLOW));
+			}
 		}
 	}
 
+	private static void freeze(ServerPlayer player) {
+		addModifier(player, Attributes.MOVEMENT_SPEED);
+		addModifier(player, Attributes.JUMP_STRENGTH);
+	}
+
 	private static void unfreeze(ServerPlayer player) {
-		var movementSpeed = player.getAttribute(Attributes.MOVEMENT_SPEED);
-		if (movementSpeed != null) {
-			movementSpeed.removeModifier(FREEZE_MODIFIER_ID);
+		removeModifier(player, Attributes.MOVEMENT_SPEED);
+		removeModifier(player, Attributes.JUMP_STRENGTH);
+	}
+
+	private static void addModifier(ServerPlayer player, Holder<Attribute> attribute) {
+		AttributeInstance instance = player.getAttribute(attribute);
+		if (instance != null && !instance.hasModifier(FREEZE_MODIFIER_ID)) {
+			instance.addTransientModifier(new AttributeModifier(FREEZE_MODIFIER_ID, FREEZE_SPEED_PENALTY, AttributeModifier.Operation.ADD_VALUE));
+		}
+	}
+
+	private static void removeModifier(ServerPlayer player, Holder<Attribute> attribute) {
+		AttributeInstance instance = player.getAttribute(attribute);
+		if (instance != null) {
+			instance.removeModifier(FREEZE_MODIFIER_ID);
 		}
 	}
 
@@ -218,18 +264,44 @@ public final class MatchManager {
 				drainQueue(mode, server);
 			}
 		}
-		tickCountdowns();
+		tickCountdowns(server);
 	}
 
-	private static void tickCountdowns() {
-		int countdownTicks = MatchConfig.get().countdownSeconds * TICKS_PER_SECOND;
-		for (Match match : MATCHES) {
+	private static void tickCountdowns(MinecraftServer server) {
+		// Indexed loop, not for-each: activateMatch doesn't mutate MATCHES today, but the next
+		// slice (elimination/end-of-match) will want to remove a match from within a tick pass,
+		// and a for-each here would throw ConcurrentModificationException the day that lands.
+		for (int i = 0; i < MATCHES.size(); i++) {
+			Match match = MATCHES.get(i);
 			if (match.state != Match.State.COUNTDOWN) {
 				continue;
 			}
+			reassertFrozenPositions(match, server);
 			match.ticksInState++;
-			if (match.ticksInState >= countdownTicks) {
+			if (match.ticksInState >= match.countdownTicks) {
 				activateMatch(match);
+			}
+		}
+	}
+
+	/** Attribute modifiers only stop a well-behaved client from initiating movement - this is the actual server-authoritative "no mover" enforcement. */
+	private static void reassertFrozenPositions(Match match, MinecraftServer server) {
+		for (UUID playerId : match.allPlayers()) {
+			ServerPlayer player = server.getPlayerList().getPlayer(playerId);
+			Team team = match.teamOf(playerId);
+			if (player == null || team == null) {
+				continue;
+			}
+			Optional<ArenaSpawn> spawn = ArenaInstanceService.teamSpawn(match.instance, match.mapId, team);
+			if (spawn.isEmpty()) {
+				continue;
+			}
+			ArenaSpawn s = spawn.get();
+			double dx = player.getX() - s.x();
+			double dy = player.getY() - s.y();
+			double dz = player.getZ() - s.z();
+			if (dx * dx + dy * dy + dz * dz > FREEZE_DRIFT_TOLERANCE * FREEZE_DRIFT_TOLERANCE) {
+				player.teleportTo(match.arenaLevel, s.x(), s.y(), s.z(), Set.of(), player.getYRot(), player.getXRot(), false);
 			}
 		}
 	}
@@ -264,14 +336,19 @@ public final class MatchManager {
 		if (match == null) {
 			return;
 		}
-		// Full reconnect-aware handling (rejoin an already-running match) isn't built yet - for now
-		// any disconnect just drops the player from the roster, whatever state the match is in.
-		// Leaving the old, incomplete "only clean up WAITING_FOR_PLAYERS" behavior permanently
-		// locked that account out of /bedfight join, which is worse than losing the roster entry.
+		// Full reconnect-aware handling (rejoin an already-running ACTIVE match) isn't built yet -
+		// for now any disconnect just drops the player from the roster. A COUNTDOWN match reverts
+		// to WAITING_FOR_PLAYERS instead of ticking down short-handed, since nothing could ever
+		// refill it otherwise (findFormingMatch only matches WAITING_FOR_PLAYERS).
+		boolean wasCountingDown = match.state == Match.State.COUNTDOWN;
 		match.removePlayer(playerId);
 		if (match.isEmpty()) {
 			MATCHES.remove(match);
 			ArenaInstanceService.free(match.instance);
+			return;
+		}
+		if (wasCountingDown) {
+			revertToWaiting(match);
 		}
 	}
 }

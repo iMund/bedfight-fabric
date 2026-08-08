@@ -25,6 +25,7 @@ final class Match {
 	final Map<Team, List<UUID>> rosters = new EnumMap<>(Team.class);
 	State state = State.WAITING_FOR_PLAYERS;
 	int ticksInState;
+	int countdownTicks;
 
 	Match(GameMode mode, ArenaInstance instance, String mapId, ServerLevel arenaLevel) {
 		this.mode = mode;
@@ -68,5 +69,14 @@ final class Match {
 		List<UUID> all = new ArrayList<>(rosters.get(Team.AZUL));
 		all.addAll(rosters.get(Team.VERMELHO));
 		return all;
+	}
+
+	Team teamOf(UUID playerId) {
+		for (Map.Entry<Team, List<UUID>> entry : rosters.entrySet()) {
+			if (entry.getValue().contains(playerId)) {
+				return entry.getKey();
+			}
+		}
+		return null;
 	}
 }
