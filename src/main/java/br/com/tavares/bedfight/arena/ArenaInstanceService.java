@@ -4,7 +4,9 @@ import br.com.tavares.bedfight.config.YamlConfigLoader;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Set;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Vec3i;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtAccounter;
@@ -30,7 +32,10 @@ public final class ArenaInstanceService {
 
 		StructurePlaceSettings settings = new StructurePlaceSettings();
 		template.placeInWorld(arenaLevel, instance.origin(), instance.origin(), settings, arenaLevel.getRandom(), Block.UPDATE_ALL);
-		instance.occupy(mapId);
+
+		Vec3i size = template.getSize();
+		Set<BlockPos> protectedBlocks = BedProtectionScanner.scan(arenaLevel, instance.origin(), size);
+		instance.occupy(mapId, protectedBlocks);
 	}
 
 	public static void free(ArenaInstance instance) {

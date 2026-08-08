@@ -53,8 +53,12 @@ Bed Fight - minigame 1v1 e 2v2. Mod Fabric.
 4. Contagem termina → libera movimento, colocar bloco e PvP juntos. Esse é o único período de
    congelamento/graça — não se repete a cada respawn.
 5. Durante a partida, só é possível **quebrar** a cama, a camada de madeira ao redor e a camada de
-   end stone ao redor da madeira — nenhum outro bloco do mapa é quebrável. Blocos minerados da cama
-   inimiga ficam no inventário como recurso. Pode **colocar** qualquer bloco do inventário.
+   end stone ao redor da madeira — nenhum outro bloco do mapa é quebrável. **Implementado**: ao colar
+   um mapa numa instância, o mod escaneia a estrutura procurando cama (`#minecraft:beds`), depois
+   preenchimento por adjacência através de madeira (`#minecraft:planks`/`#minecraft:logs`) e depois
+   end stone — só essas posições ficam quebráveis (`PlayerBlockBreakEvents.BEFORE` nega o resto dentro
+   da dimensão `bedfight:arena`). Blocos minerados da cama inimiga ficam no inventário como recurso.
+   Pode **colocar** qualquer bloco do inventário.
 6. **Morte com a própria cama viva**: perde o inventário atual (reseta), fica ~3s (valor exato a
    configurar depois) em modo espectador, e respawna com o kit padrão de novo.
 7. **Morte com a própria cama destruída** (eliminação final, relevante no 2v2): vira **espectador da
