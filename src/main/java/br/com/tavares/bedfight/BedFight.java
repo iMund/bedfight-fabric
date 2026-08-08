@@ -1,9 +1,11 @@
 package br.com.tavares.bedfight;
 
+import br.com.tavares.bedfight.arena.MapSelectionManager;
 import br.com.tavares.bedfight.config.ArenaConfig;
 import br.com.tavares.bedfight.config.KitConfig;
 import br.com.tavares.bedfight.config.MatchConfig;
 import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -17,6 +19,10 @@ public class BedFight implements ModInitializer {
 		ArenaConfig.load();
 		KitConfig.load();
 		MatchConfig.load();
+
+		MapSelectionManager.register();
+		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
+			BedFightCommands.register(dispatcher));
 
 		LOGGER.info("Bed Fight loaded.");
 	}

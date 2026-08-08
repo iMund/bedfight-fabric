@@ -21,10 +21,14 @@ Bed Fight - minigame 1v1 e 2v2. Mod Fabric.
 - Admin seleciona uma região com um item "varinha" do próprio mod (clique esquerdo/direito marca
   canto 1/2, estilo WorldEdit, sem depender de WorldEdit de verdade).
 - Ponto de spawn de cada time: admin fica em pé no local e roda `/bedfight admin setspawn <mapId>
-  azul|vermelho` — grava a posição **relativa ao canto 1 da região** (+ direção que está olhando), já
-  que cada instância cola o mapa num offset de grid diferente.
+  azul|vermelho` — grava a posição **relativa ao canto mínimo da seleção** (+ direção que está
+  olhando), já que cada instância cola o mapa num offset de grid diferente. Precisa da seleção da
+  varinha ainda ativa (mesma região) quando roda o comando.
 - Captura: `/bedfight admin capturar <mapId>` — salva a região como **Structure Template NBT** e um
-  JSON companheiro com os offsets/yaw de spawn de cada time.
+  `map.yml` companheiro com o tamanho da região e os offsets/yaw de spawn de cada time.
+- `/bedfight admin wand` entrega a varinha (machado dourado renomeado — mesma convenção do WorldEdit):
+  clique esquerdo marca o canto 1, clique direito marca o canto 2, sem quebrar/interagir de verdade
+  com o bloco.
 - Instâncias vivem numa **dimensão dedicada** (fora do overworld de sobrevivência). Cada instância =
   o template de um mapa colado (`StructureTemplate.placeInWorld`) num offset de grid (ex: instância N
   em `x = N * 1000`). O pool de arenas escolhe um mapa (aleatório/rotação) entre os cadastrados por
@@ -66,18 +70,26 @@ Tudo em YAML (comentado, editável à mão), em `config/bedfight/` na pasta do s
 - `arena.yml` — dimensão dedicada, tamanho do pool de instâncias, espaçamento do grid.
 - `kit.yml` — lista do kit fixo (item, quantidade, encantamentos opcionais).
 - `match.yml` — tempos da partida (contagem regressiva, delay de respawn, janela de escolha no fim).
-- `maps/<mapId>/` *(ainda não implementado)* — cada mapa cadastrado terá sua própria pasta com
-  `map.yml` (offsets/yaw de spawn de cada time) e `structure.nbt` (a estrutura capturada).
+- `maps/<mapId>/` — cada mapa capturado tem sua própria pasta com `map.yml` (tamanho da região,
+  offsets/yaw de spawn de cada time) e `structure.nbt` (a estrutura capturada). Gerado pelo fluxo
+  varinha → `setspawn` → `capturar` descrito acima.
 
 Um arquivo só é escrito a partir do default embutido no mod se ainda não existir em disco — o mod
 nunca sobrescreve uma config já editada. `./gradlew runServer` gera os arquivos automaticamente na
 primeira execução.
 
+## PvP
+
+Combate estilo 1.8: sem cooldown de ataque do 1.9+ (dano cheio em todo clique) e sem escudo. Vale só
+dentro da dimensão da arena, via mixin — ainda não implementado.
+
 ## Em aberto
 
 - Como a alocação de instância se conecta com a fila no código (mensagem de espera quando todas as 4
   instâncias estão ocupadas).
-- Captura de mapa (item varinha, comandos admin `setspawn`/`capturar`, `maps/<mapId>/`) ainda não
-  implementada.
-- Fila, GUI, pool de arenas, lógica de cama, kit-on-join e fluxo de partida ainda não implementados —
-  só existe o scaffold do mod e o sistema de config (`arena.yml`, `kit.yml`, `match.yml`).
+- Dimensão dedicada da arena ainda não registrada — o `dimension` do `arena.yml` aponta pra um id que
+  ainda não existe.
+- Pool de instâncias (colar/resetar o `structure.nbt` capturado em cada slot do grid) ainda não
+  implementado — hoje só é possível capturar um mapa, não jogar nele.
+- PvP estilo 1.8 (ver acima), fila, GUI, lógica de cama, kit-on-join e o resto do fluxo de partida
+  ainda não implementados.
