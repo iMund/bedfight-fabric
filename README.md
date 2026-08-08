@@ -1,8 +1,6 @@
 # bedfight-fabric
 
-Bed Fight — duelo de cama 1v1/2v2. Variante compacta de bedwars, sem geradores de recurso nem loja,
-só ilha, cama e porrada. Mod Fabric, nascido pro servidor UBMC mas feito pra rodar em qualquer
-servidor.
+Bed Fight - minigame 1v1 e 2v2. Mod Fabric.
 
 ## Design confirmado
 

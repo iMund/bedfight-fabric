@@ -3,7 +3,7 @@
 	"id": "bedfight",
 	"version": "${version}",
 	"name": "bedfight",
-	"description": "Bed Fight — duelo de cama 1v1/2v2. Sem grana, sem loja, só ilha, cama e porrada.",
+	"description": "Bed Fight - minigame 1v1 e 2v2.",
 	"authors": [
 		"Tavares"
 	],
