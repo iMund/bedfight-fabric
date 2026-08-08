@@ -9,6 +9,8 @@ import br.com.tavares.bedfight.arena.ArenaSpawn;
 import br.com.tavares.bedfight.arena.MapCaptureException;
 import br.com.tavares.bedfight.arena.MapRegistry;
 import br.com.tavares.bedfight.arena.Team;
+import br.com.tavares.bedfight.config.MatchConfig;
+import br.com.tavares.bedfight.kit.KitService;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.EnumMap;
@@ -23,14 +25,16 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.ai.attributes.AttributeModifier;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 
 /**
- * Queue -&gt; instance/map allocation -&gt; team assignment -&gt; teleport. Stops at "player is standing in
- * their team's spot with no kit, free to move" - the countdown/freeze/kit-delivery-on-fill,
- * death/respawn/elimination, in-match disconnect handling and end-of-match flow are not built yet
+ * Queue -&gt; instance/map allocation -&gt; team assignment -&gt; teleport -&gt; countdown/freeze/kit -&gt; active.
+ * Death/respawn/elimination, in-match disconnect handling and end-of-match flow are not built yet
  * (see README/memory - this is the next slice on top of this one).
  *
  * All mutable state here is only ever touched from the server thread: ServerPlayConnectionEvents.DISCONNECT
@@ -40,6 +44,8 @@ import net.minecraft.server.level.ServerPlayer;
 public final class MatchManager {
 	private static final long JOIN_COOLDOWN_MILLIS = 3000;
 	private static final int QUEUE_DRAIN_INTERVAL_TICKS = 100;
+	private static final int TICKS_PER_SECOND = 20;
+	private static final Identifier FREEZE_MODIFIER_ID = Identifier.fromNamespaceAndPath(BedFight.MOD_ID, "countdown_freeze");
 
 	private static final Map<GameMode, MatchQueue> QUEUES = new EnumMap<>(GameMode.class);
 	private static final List<Match> MATCHES = new ArrayList<>();
@@ -87,6 +93,12 @@ public final class MatchManager {
 		return result;
 	}
 
+	/** True while the player's match is in the pre-start countdown - frozen, no PvP, no block placement. */
+	public static boolean isFrozen(UUID playerId) {
+		Match match = PLAYER_MATCH.get(playerId);
+		return match != null && match.state == Match.State.COUNTDOWN;
+	}
+
 	/** How many matches are forming or running - reload guards on this to avoid corrupting a live match. */
 	public static int activeMatchCount() {
 		return MATCHES.size();
@@ -117,7 +129,7 @@ public final class MatchManager {
 				BedFight.LOGGER.error("Falha ao colar o mapa {} pra uma nova partida.", mapId, exception);
 				return new JoinResult(false, false, "Falha ao preparar a arena, veja o console.");
 			}
-			match = new Match(mode, instance.get(), mapId);
+			match = new Match(mode, instance.get(), mapId, arenaLevel);
 			MATCHES.add(match);
 		}
 
@@ -140,9 +152,50 @@ public final class MatchManager {
 		player.teleportTo(arenaLevel, s.x(), s.y(), s.z(), Set.of(), s.yaw(), s.pitch(), false);
 
 		if (match.isFull()) {
-			match.state = Match.State.COUNTDOWN;
+			startCountdown(match);
 		}
 		return new JoinResult(true, false, "Entrou no time " + team.id() + " (" + match.playerCount() + "/" + mode.totalPlayers() + ").");
+	}
+
+	private static void startCountdown(Match match) {
+		match.state = Match.State.COUNTDOWN;
+		match.ticksInState = 0;
+		for (UUID playerId : match.allPlayers()) {
+			ServerPlayer player = match.arenaLevel.getServer().getPlayerList().getPlayer(playerId);
+			if (player == null) {
+				continue;
+			}
+			KitService.giveKit(player);
+			freeze(player);
+			player.sendSystemMessage(Component.literal("Partida comecando em " + MatchConfig.get().countdownSeconds + "s...").withStyle(ChatFormatting.GOLD));
+		}
+	}
+
+	private static void activateMatch(Match match) {
+		match.state = Match.State.ACTIVE;
+		match.ticksInState = 0;
+		for (UUID playerId : match.allPlayers()) {
+			ServerPlayer player = match.arenaLevel.getServer().getPlayerList().getPlayer(playerId);
+			if (player == null) {
+				continue;
+			}
+			unfreeze(player);
+			player.sendSystemMessage(Component.literal("Vai!").withStyle(ChatFormatting.GREEN, ChatFormatting.BOLD));
+		}
+	}
+
+	private static void freeze(ServerPlayer player) {
+		var movementSpeed = player.getAttribute(Attributes.MOVEMENT_SPEED);
+		if (movementSpeed != null && !movementSpeed.hasModifier(FREEZE_MODIFIER_ID)) {
+			movementSpeed.addTransientModifier(new AttributeModifier(FREEZE_MODIFIER_ID, -1.0, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL));
+		}
+	}
+
+	private static void unfreeze(ServerPlayer player) {
+		var movementSpeed = player.getAttribute(Attributes.MOVEMENT_SPEED);
+		if (movementSpeed != null) {
+			movementSpeed.removeModifier(FREEZE_MODIFIER_ID);
+		}
 	}
 
 	private static boolean isQueued(UUID playerId) {
@@ -158,14 +211,26 @@ public final class MatchManager {
 		return null;
 	}
 
-	/** Retries queued players periodically so a freed-up instance doesn't leave them stuck forever. */
 	private static void onServerTick(MinecraftServer server) {
 		tickCounter++;
-		if (tickCounter % QUEUE_DRAIN_INTERVAL_TICKS != 0) {
-			return;
+		if (tickCounter % QUEUE_DRAIN_INTERVAL_TICKS == 0) {
+			for (GameMode mode : GameMode.values()) {
+				drainQueue(mode, server);
+			}
 		}
-		for (GameMode mode : GameMode.values()) {
-			drainQueue(mode, server);
+		tickCountdowns();
+	}
+
+	private static void tickCountdowns() {
+		int countdownTicks = MatchConfig.get().countdownSeconds * TICKS_PER_SECOND;
+		for (Match match : MATCHES) {
+			if (match.state != Match.State.COUNTDOWN) {
+				continue;
+			}
+			match.ticksInState++;
+			if (match.ticksInState >= countdownTicks) {
+				activateMatch(match);
+			}
 		}
 	}
 

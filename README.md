@@ -54,8 +54,14 @@ Bed Fight - minigame 1v1 e 2v2. Mod Fabric.
    mesmo modo entram na mesma partida em formação até completar, alternando pro time com menos gente.
 3. Fila enche → **kit entregue na hora** pra todo mundo, começa contagem de **5 segundos**. Durante
    esse tempo os jogadores ficam **congelados** (sem mover, sem colocar bloco, sem PvP).
+   **Implementado**: `MatchManager` dá o kit e aplica um modificador de atributo (velocidade de
+   movimento × 0) em cada jogador quando a partida enche; `MatchFreeze` nega colocar bloco
+   (`UseBlockCallback`) e dano de PvP (`ServerLivingEntityEvents.ALLOW_DAMAGE`) enquanto a partida
+   está em contagem regressiva.
 4. Contagem termina → libera movimento, colocar bloco e PvP juntos. Esse é o único período de
-   congelamento/graça — não se repete a cada respawn.
+   congelamento/graça — não se repete a cada respawn. **Implementado**: um hook de tick
+   (`ServerTickEvents.END_SERVER_TICK`) conta os ticks da contagem regressiva (`match.yml`) e libera
+   tudo de uma vez quando termina.
 5. Durante a partida, só é possível **quebrar** a cama, a camada de madeira ao redor e a camada de
    end stone ao redor da madeira — nenhum outro bloco do mapa é quebrável. **Implementado**: ao colar
    um mapa numa instância, o mod escaneia a estrutura procurando cama (`#minecraft:beds`), depois
@@ -102,13 +108,14 @@ conseguir um dentro da arena (sem baú, sem crafting).
 
 ## Em aberto
 
-- Contagem regressiva de 5s + congelamento (sem mover/colocar bloco/PvP) + entrega do kit no momento
-  em que a fila enche — `Match` já muda pro estado `COUNTDOWN` quando enche, mas não tem nenhum
-  temporizador rodando ainda, é só um estado parado.
 - Morte com cama viva (reset de inventário + respawn), eliminação final (cama destruída), fim de
-  partida (itens de cama/papel na hotbar) e desconexão durante partida já em andamento (só a
-  desconexão *durante a fila/formação* está tratada — libera a instância se a partida esvaziar).
+  partida (itens de cama/papel na hotbar) — nada disso existe ainda, a partida fica em `ACTIVE` pra
+  sempre depois da contagem regressiva.
+- Desconexão durante partida já em andamento (`ACTIVE`) hoje só tira o jogador do roster (sem
+  reconexão pra voltar à partida em andamento, que é o comportamento final desejado).
 - Chest GUI do `/bedfight` (hoje é só `/bedfight join 1v1|2v2` direto por comando).
+- Sem `/bedfight leave` nem conceito de lobby — jogador na fila só sai desconectando (o dreno de fila
+  a cada ~5s evita ficar preso pra sempre quando libera instância, mas não ajuda se nunca liberar).
 - **Não testado com cliente real** (mesma limitação que o ubmcrpg tinha na migração): tudo foi
   verificado por build limpo, boot limpo do servidor e conferência das assinaturas de API contra o
   jar real, mas ninguém ainda construiu um mapa de verdade, capturou e

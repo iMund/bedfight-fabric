@@ -7,6 +7,7 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import net.minecraft.server.level.ServerLevel;
 
 /** A single arena instance's match, from the moment the first player is teleported in until it ends. */
 final class Match {
@@ -20,13 +21,16 @@ final class Match {
 	final GameMode mode;
 	final ArenaInstance instance;
 	final String mapId;
+	final ServerLevel arenaLevel;
 	final Map<Team, List<UUID>> rosters = new EnumMap<>(Team.class);
 	State state = State.WAITING_FOR_PLAYERS;
+	int ticksInState;
 
-	Match(GameMode mode, ArenaInstance instance, String mapId) {
+	Match(GameMode mode, ArenaInstance instance, String mapId, ServerLevel arenaLevel) {
 		this.mode = mode;
 		this.instance = instance;
 		this.mapId = mapId;
+		this.arenaLevel = arenaLevel;
 		rosters.put(Team.AZUL, new ArrayList<>());
 		rosters.put(Team.VERMELHO, new ArrayList<>());
 	}
@@ -58,5 +62,11 @@ final class Match {
 
 	boolean isEmpty() {
 		return playerCount() == 0;
+	}
+
+	List<UUID> allPlayers() {
+		List<UUID> all = new ArrayList<>(rosters.get(Team.AZUL));
+		all.addAll(rosters.get(Team.VERMELHO));
+		return all;
 	}
 }
