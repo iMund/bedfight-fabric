@@ -34,9 +34,12 @@ Bed Fight - minigame 1v1 e 2v2. Mod Fabric.
   o template de um mapa colado (`StructureTemplate.placeInWorld`) num offset de grid (ex: instância N
   em `x = N * 1000`). O pool de arenas escolhe um mapa (aleatório/rotação) entre os cadastrados por
   partida.
-- Reset entre partidas = colar o template limpo de novo na mesma coordenada.
+- Reset entre partidas = colar o template limpo de novo na mesma coordenada (já implementado: colar é
+  sempre a mesma operação, seja a primeira vez ou um reset).
 - Pool inicial: **4 instâncias simultâneas**, configurável. Se todas estiverem ocupadas quando a fila
   enche, os jogadores continuam esperando na fila com uma mensagem (não são impedidos de entrar).
+- `/bedfight admin testarena <instancia> <mapId>` cola um mapa numa instância e teleporta o admin pro
+  spawn do time azul — comando de verificação manual, não faz parte do fluxo de partida.
 
 ## Fluxo completo de partida
 
@@ -87,8 +90,11 @@ dentro da dimensão da arena, via mixin — ainda não implementado.
 ## Em aberto
 
 - Como a alocação de instância se conecta com a fila no código (mensagem de espera quando todas as 4
-  instâncias estão ocupadas).
-- Pool de instâncias (colar/resetar o `structure.nbt` capturado em cada slot do grid da dimensão
-  `bedfight:arena`) ainda não implementado — hoje só é possível capturar um mapa, não jogar nele.
+  instâncias estão ocupadas) — a escolha aleatória/rotação de mapa entre os cadastrados também não
+  está implementada, hoje `testarena` exige informar o mapId manualmente.
 - PvP estilo 1.8 (ver acima), fila, GUI, lógica de cama, kit-on-join e o resto do fluxo de partida
   ainda não implementados.
+- **Não testado com cliente real** (mesma limitação que o ubmcrpg tinha na migração): a captura e a
+  colagem de estrutura foram verificadas por build limpo, boot limpo do servidor e conferência das
+  assinaturas de API contra o jar real, mas ninguém ainda construiu um mapa de verdade, capturou e
+  colou numa instância pra confirmar visualmente o resultado.
