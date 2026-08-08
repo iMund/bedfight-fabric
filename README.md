@@ -29,6 +29,10 @@ Bed Fight - minigame 1v1 e 2v2. Mod Fabric.
 - `/bedfight admin wand` entrega a varinha (machado dourado renomeado — mesma convenção do WorldEdit):
   clique esquerdo marca o canto 1, clique direito marca o canto 2, sem quebrar/interagir de verdade
   com o bloco.
+- `/bedfight admin buildzone` teleporta o admin pra uma plataforma isolada dentro da própria dimensão
+  `bedfight:arena` (bem longe de qualquer instância do grid) — constrói o mapa ali em vez de usar o
+  overworld de sobrevivência. A captura funciona em qualquer dimensão onde o admin estiver, não é
+  preciso nada especial além de estar lá.
 - Instâncias vivem numa **dimensão dedicada** (`bedfight:arena`, void/flat, registrada via datapack
   embutido no mod — sem geração de terreno, já que todo cenário vem dos mapas colados). Cada instância =
   o template de um mapa colado (`StructureTemplate.placeInWorld`) num offset de grid (ex: instância N

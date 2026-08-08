@@ -34,6 +34,8 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 
 import static net.minecraft.commands.Commands.argument;
 import static net.minecraft.commands.Commands.literal;
@@ -42,6 +44,9 @@ public final class BedFightCommands {
 	private static final Pattern VALID_MAP_ID = Pattern.compile("[a-z0-9_-]{1,32}");
 	private static final SimpleCommandExceptionType INVALID_MAP_ID = new SimpleCommandExceptionType(
 		Component.literal("mapId invalido - use so letras minusculas, numeros, '-' e '_' (1 a 32 caracteres)."));
+	/** Well outside any grid slot (instances only ever sit at x = index * gridSpacingBlocks, always >= 0) - a safe place to build/capture a map without ever touching survival or overlapping a live match. */
+	private static final BlockPos BUILD_ZONE_ORIGIN = new BlockPos(-2000, 100, 0);
+	private static final int BUILD_ZONE_PLATFORM_RADIUS = 20;
 
 	private BedFightCommands() {
 	}
@@ -71,7 +76,9 @@ public final class BedFightCommands {
 				.then(literal("testkit")
 					.executes(BedFightCommands::testKit))
 				.then(literal("reload")
-					.executes(BedFightCommands::reload)))
+					.executes(BedFightCommands::reload))
+				.then(literal("buildzone")
+					.executes(BedFightCommands::buildZone)))
 			.then(literal("join")
 				.then(literal("1v1")
 					.executes(context -> join(context, GameMode.ONE_V_ONE)))
@@ -200,6 +207,26 @@ public final class BedFightCommands {
 		MatchConfig.load();
 		ArenaInstancePool.init();
 		context.getSource().sendSuccess(() -> Component.literal("Configs recarregadas e pool de instancias reconstruido.").withStyle(ChatFormatting.GREEN), false);
+		return 1;
+	}
+
+	/** Teleports the admin to an isolated build platform inside bedfight:arena, far from any instance grid slot - build the map "molde" here instead of in the survival overworld, then select/setspawn/capturar from here same as always. */
+	private static int buildZone(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+		ServerPlayer player = context.getSource().getPlayerOrException();
+		ServerLevel arenaLevel = ArenaDimension.get(context.getSource().getServer());
+		if (arenaLevel == null) {
+			context.getSource().sendFailure(Component.literal("Dimensao bedfight:arena nao carregou.").withStyle(ChatFormatting.RED));
+			return 0;
+		}
+		if (arenaLevel.getBlockState(BUILD_ZONE_ORIGIN).isAir()) {
+			for (int dx = -BUILD_ZONE_PLATFORM_RADIUS; dx <= BUILD_ZONE_PLATFORM_RADIUS; dx++) {
+				for (int dz = -BUILD_ZONE_PLATFORM_RADIUS; dz <= BUILD_ZONE_PLATFORM_RADIUS; dz++) {
+					arenaLevel.setBlock(BUILD_ZONE_ORIGIN.offset(dx, 0, dz), Blocks.GLASS.defaultBlockState(), Block.UPDATE_CLIENTS);
+				}
+			}
+		}
+		player.teleportTo(arenaLevel, BUILD_ZONE_ORIGIN.getX() + 0.5, BUILD_ZONE_ORIGIN.getY() + 1, BUILD_ZONE_ORIGIN.getZ() + 0.5, Set.of(), player.getYRot(), player.getXRot(), false);
+		context.getSource().sendSuccess(() -> Component.literal("Teleportado pra area de construcao (fora do overworld, longe de qualquer instancia). Construa o mapa aqui e capture normalmente.").withStyle(ChatFormatting.GREEN), false);
 		return 1;
 	}
 
