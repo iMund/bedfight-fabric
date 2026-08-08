@@ -29,4 +29,17 @@ public final class MapRegistry {
 		ids.sort(String::compareTo);
 		return ids;
 	}
+
+	/** Same as listMapIds(), but only maps with both team spawns recorded - the only ones actually safe to start a match on. */
+	public static List<String> listPlayableMapIds() {
+		List<String> playable = new ArrayList<>();
+		for (String mapId : listMapIds()) {
+			Path file = MapCaptureService.mapDir(mapId).resolve("map.yml");
+			MapData data = YamlConfigLoader.readIfExists(file, MapData.class, new MapData());
+			if (data.spawns.containsKey(Team.AZUL.id()) && data.spawns.containsKey(Team.VERMELHO.id())) {
+				playable.add(mapId);
+			}
+		}
+		return playable;
+	}
 }

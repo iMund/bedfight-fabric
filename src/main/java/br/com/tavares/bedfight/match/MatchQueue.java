@@ -1,5 +1,6 @@
 package br.com.tavares.bedfight.match;
 
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.UUID;
@@ -25,6 +26,6 @@ final class MatchQueue {
 	}
 
 	Set<UUID> waiting() {
-		return waiting;
+		return Collections.unmodifiableSet(waiting);
 	}
 }

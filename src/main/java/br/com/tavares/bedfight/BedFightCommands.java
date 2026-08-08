@@ -190,22 +190,22 @@ public final class BedFightCommands {
 	}
 
 	private static int reload(CommandContext<CommandSourceStack> context) {
+		int activeMatches = MatchManager.activeMatchCount();
+		if (activeMatches > 0) {
+			context.getSource().sendFailure(Component.literal("Tem " + activeMatches + " partida(s) em andamento - reconstruir o pool agora quebraria elas. Espere terminar.").withStyle(ChatFormatting.RED));
+			return 0;
+		}
 		ArenaConfig.load();
 		KitConfig.load();
 		MatchConfig.load();
 		ArenaInstancePool.init();
-		context.getSource().sendSuccess(() -> Component.literal("Configs recarregadas. O pool de instancias foi reconstruido (qualquer instancia em uso foi liberada).").withStyle(ChatFormatting.GREEN), false);
+		context.getSource().sendSuccess(() -> Component.literal("Configs recarregadas e pool de instancias reconstruido.").withStyle(ChatFormatting.GREEN), false);
 		return 1;
 	}
 
 	private static int join(CommandContext<CommandSourceStack> context, GameMode mode) throws CommandSyntaxException {
 		ServerPlayer player = context.getSource().getPlayerOrException();
-		ServerLevel arenaLevel = ArenaDimension.get(context.getSource().getServer());
-		if (arenaLevel == null) {
-			context.getSource().sendFailure(Component.literal("Dimensao bedfight:arena nao carregou.").withStyle(ChatFormatting.RED));
-			return 0;
-		}
-		MatchManager.JoinResult result = MatchManager.join(player, mode, arenaLevel);
+		MatchManager.JoinResult result = MatchManager.join(player, mode, context.getSource().getServer());
 		if (result.joined()) {
 			context.getSource().sendSuccess(() -> Component.literal(result.message()).withStyle(ChatFormatting.GREEN), false);
 			return 1;
