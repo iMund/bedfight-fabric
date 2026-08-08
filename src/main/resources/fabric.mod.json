@@ -1,0 +1,23 @@
+{
+	"schemaVersion": 1,
+	"id": "bedfight",
+	"version": "${version}",
+	"name": "bedfight",
+	"description": "Minigame Bed Fight (1v1/2v2) para o servidor UBMC.",
+	"authors": [
+		"Tavares"
+	],
+	"license": "CC0-1.0",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"br.com.tavares.bedfight.BedFight"
+		]
+	},
+	"depends": {
+		"fabricloader": ">=0.19.3",
+		"minecraft": "~26.2",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}
