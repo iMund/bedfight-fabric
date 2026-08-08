@@ -16,6 +16,8 @@ import br.com.tavares.bedfight.config.ArenaConfig;
 import br.com.tavares.bedfight.config.KitConfig;
 import br.com.tavares.bedfight.config.MatchConfig;
 import br.com.tavares.bedfight.kit.KitService;
+import br.com.tavares.bedfight.match.GameMode;
+import br.com.tavares.bedfight.match.MatchManager;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
@@ -69,7 +71,12 @@ public final class BedFightCommands {
 				.then(literal("testkit")
 					.executes(BedFightCommands::testKit))
 				.then(literal("reload")
-					.executes(BedFightCommands::reload))));
+					.executes(BedFightCommands::reload)))
+			.then(literal("join")
+				.then(literal("1v1")
+					.executes(context -> join(context, GameMode.ONE_V_ONE)))
+				.then(literal("2v2")
+					.executes(context -> join(context, GameMode.TWO_V_TWO)))));
 	}
 
 	private static int giveWand(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
@@ -189,6 +196,22 @@ public final class BedFightCommands {
 		ArenaInstancePool.init();
 		context.getSource().sendSuccess(() -> Component.literal("Configs recarregadas. O pool de instancias foi reconstruido (qualquer instancia em uso foi liberada).").withStyle(ChatFormatting.GREEN), false);
 		return 1;
+	}
+
+	private static int join(CommandContext<CommandSourceStack> context, GameMode mode) throws CommandSyntaxException {
+		ServerPlayer player = context.getSource().getPlayerOrException();
+		ServerLevel arenaLevel = ArenaDimension.get(context.getSource().getServer());
+		if (arenaLevel == null) {
+			context.getSource().sendFailure(Component.literal("Dimensao bedfight:arena nao carregou.").withStyle(ChatFormatting.RED));
+			return 0;
+		}
+		MatchManager.JoinResult result = MatchManager.join(player, mode, arenaLevel);
+		if (result.joined()) {
+			context.getSource().sendSuccess(() -> Component.literal(result.message()).withStyle(ChatFormatting.GREEN), false);
+			return 1;
+		}
+		context.getSource().sendFailure(Component.literal(result.message()).withStyle(ChatFormatting.YELLOW));
+		return 0;
 	}
 
 	private static String requireValidMapId(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {

@@ -6,6 +6,7 @@ import br.com.tavares.bedfight.arena.MapSelectionManager;
 import br.com.tavares.bedfight.config.ArenaConfig;
 import br.com.tavares.bedfight.config.KitConfig;
 import br.com.tavares.bedfight.config.MatchConfig;
+import br.com.tavares.bedfight.match.MatchManager;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import org.slf4j.Logger;
@@ -25,6 +26,7 @@ public class BedFight implements ModInitializer {
 
 		MapSelectionManager.register();
 		ArenaBlockProtection.register();
+		MatchManager.register();
 		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
 			BedFightCommands.register(dispatcher));
 

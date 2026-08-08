@@ -44,10 +44,14 @@ Bed Fight - minigame 1v1 e 2v2. Mod Fabric.
 ## Fluxo completo de partida
 
 1. Jogador roda `/bedfight` → chest GUI → escolhe 1v1 ou 2v2 → entra na fila daquele modo (filas não
-   são compartilhadas).
+   são compartilhadas). **Implementado parcialmente**: `/bedfight join 1v1|2v2` já faz a alocação de
+   arena/mapa e a entrada no time (`MatchManager`) — a chest GUI em si ainda não existe, é só o
+   comando direto por enquanto.
 2. Ao entrar na fila, é **teleportado na hora** pro spawn do time dele numa instância de arena
    alocada — sem lobby central. **Ainda sem kit.** Pode se mover livremente na ilha enquanto a fila
-   não enche (1v1 precisa de 2 jogadores, 2v2 precisa de 4).
+   não enche (1v1 precisa de 2 jogadores, 2v2 precisa de 4). **Implementado**: aloca uma instância
+   livre + mapa aleatório entre os capturados na primeira entrada daquele modo; próximos jogadores do
+   mesmo modo entram na mesma partida em formação até completar, alternando pro time com menos gente.
 3. Fila enche → **kit entregue na hora** pra todo mundo, começa contagem de **5 segundos**. Durante
    esse tempo os jogadores ficam **congelados** (sem mover, sem colocar bloco, sem PvP).
 4. Contagem termina → libera movimento, colocar bloco e PvP juntos. Esse é o único período de
@@ -91,17 +95,21 @@ primeira execução.
 
 ## PvP
 
-Combate estilo 1.8: sem cooldown de ataque do 1.9+ (dano cheio em todo clique) e sem escudo. Vale só
-dentro da dimensão da arena, via mixin — ainda não implementado.
+Combate estilo 1.8: sem cooldown de ataque do 1.9+ (dano cheio em todo clique, sem ataque em área) e
+sem escudo. Vale só dentro da dimensão `bedfight:arena`, via mixin em `Player.getAttackStrengthScale`
+e `Player.isSweepAttack`. "Sem escudo" vale por construção — o kit nunca dá um e não tem como
+conseguir um dentro da arena (sem baú, sem crafting).
 
 ## Em aberto
 
-- Como a alocação de instância se conecta com a fila no código (mensagem de espera quando todas as 4
-  instâncias estão ocupadas) — a escolha aleatória/rotação de mapa entre os cadastrados também não
-  está implementada, hoje `testarena` exige informar o mapId manualmente.
-- PvP estilo 1.8 (ver acima), fila, GUI, lógica de cama, kit-on-join e o resto do fluxo de partida
-  ainda não implementados.
-- **Não testado com cliente real** (mesma limitação que o ubmcrpg tinha na migração): a captura e a
-  colagem de estrutura foram verificadas por build limpo, boot limpo do servidor e conferência das
-  assinaturas de API contra o jar real, mas ninguém ainda construiu um mapa de verdade, capturou e
+- Contagem regressiva de 5s + congelamento (sem mover/colocar bloco/PvP) + entrega do kit no momento
+  em que a fila enche — `Match` já muda pro estado `COUNTDOWN` quando enche, mas não tem nenhum
+  temporizador rodando ainda, é só um estado parado.
+- Morte com cama viva (reset de inventário + respawn), eliminação final (cama destruída), fim de
+  partida (itens de cama/papel na hotbar) e desconexão durante partida já em andamento (só a
+  desconexão *durante a fila/formação* está tratada — libera a instância se a partida esvaziar).
+- Chest GUI do `/bedfight` (hoje é só `/bedfight join 1v1|2v2` direto por comando).
+- **Não testado com cliente real** (mesma limitação que o ubmcrpg tinha na migração): tudo foi
+  verificado por build limpo, boot limpo do servidor e conferência das assinaturas de API contra o
+  jar real, mas ninguém ainda construiu um mapa de verdade, capturou e
   colou numa instância pra confirmar visualmente o resultado.
