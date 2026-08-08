@@ -50,7 +50,7 @@ public final class YamlConfigLoader {
 		try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
 			T loaded = newYaml(type).load(reader);
 			return loaded != null ? loaded : fallback;
-		} catch (IOException exception) {
+		} catch (IOException | RuntimeException exception) {
 			BedFight.LOGGER.error("Falha ao carregar config {}, usando valores padrao.", file, exception);
 			return fallback;
 		}
@@ -67,7 +67,7 @@ public final class YamlConfigLoader {
 			try (Writer writer = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
 				newDumper().dump(data, writer);
 			}
-		} catch (IOException exception) {
+		} catch (IOException | RuntimeException exception) {
 			BedFight.LOGGER.error("Falha ao salvar config {}.", file, exception);
 		}
 	}

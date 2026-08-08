@@ -1,30 +1,31 @@
 package br.com.tavares.bedfight;
 
+import br.com.tavares.bedfight.arena.MapCaptureException;
 import br.com.tavares.bedfight.arena.MapCaptureService;
 import br.com.tavares.bedfight.arena.MapSelection;
 import br.com.tavares.bedfight.arena.MapSelectionManager;
+import br.com.tavares.bedfight.arena.Team;
 import br.com.tavares.bedfight.arena.WandItem;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
 import java.io.IOException;
+import java.util.regex.Pattern;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.server.permissions.Permission;
-import net.minecraft.server.permissions.Permissions;
 
 import static net.minecraft.commands.Commands.argument;
 import static net.minecraft.commands.Commands.literal;
 
 public final class BedFightCommands {
-	private static final String ADMIN_PERMISSION_NODE = "bedfight.admin.use";
-	private static final Permission ADMIN_PERMISSION =
-		Permission.Atom.create(Identifier.fromNamespaceAndPath(BedFight.MOD_ID, ADMIN_PERMISSION_NODE));
+	private static final Pattern VALID_MAP_ID = Pattern.compile("[a-z0-9_-]{1,32}");
+	private static final SimpleCommandExceptionType INVALID_MAP_ID = new SimpleCommandExceptionType(
+		Component.literal("mapId invalido - use so letras minusculas, numeros, '-' e '_' (1 a 32 caracteres)."));
 
 	private BedFightCommands() {
 	}
@@ -32,15 +33,15 @@ public final class BedFightCommands {
 	public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
 		dispatcher.register(literal("bedfight")
 			.then(literal("admin")
-				.requires(BedFightCommands::hasAdminPermission)
+				.requires(source -> BedFightPermissions.hasAdminPermission(source.permissions()))
 				.then(literal("wand")
 					.executes(BedFightCommands::giveWand))
 				.then(literal("setspawn")
 					.then(argument("mapId", StringArgumentType.word())
 						.then(literal("azul")
-							.executes(context -> setSpawn(context, "azul")))
+							.executes(context -> setSpawn(context, Team.AZUL)))
 						.then(literal("vermelho")
-							.executes(context -> setSpawn(context, "vermelho")))))
+							.executes(context -> setSpawn(context, Team.VERMELHO)))))
 				.then(literal("capturar")
 					.then(argument("mapId", StringArgumentType.word())
 						.executes(BedFightCommands::capture)))));
@@ -53,23 +54,28 @@ public final class BedFightCommands {
 		return 1;
 	}
 
-	private static int setSpawn(CommandContext<CommandSourceStack> context, String team) throws CommandSyntaxException {
+	private static int setSpawn(CommandContext<CommandSourceStack> context, Team team) throws CommandSyntaxException {
 		ServerPlayer player = context.getSource().getPlayerOrException();
-		String mapId = StringArgumentType.getString(context, "mapId");
+		String mapId = requireValidMapId(context);
 		MapSelection selection = MapSelectionManager.get(player.getUUID());
 		if (selection == null || !selection.isComplete()) {
 			context.getSource().sendFailure(Component.literal("Marque os dois cantos da regiao com a varinha antes.").withStyle(ChatFormatting.RED));
 			return 0;
 		}
 		BlockPos pos = player.blockPosition();
-		MapCaptureService.setSpawn(mapId, team, selection, pos, player.getYRot());
-		context.getSource().sendSuccess(() -> Component.literal("Spawn do time " + team + " definido para o mapa " + mapId + ".").withStyle(ChatFormatting.GREEN), false);
+		try {
+			MapCaptureService.setSpawn(mapId, team, selection, pos, player.getYRot(), player.getXRot());
+		} catch (MapCaptureException exception) {
+			context.getSource().sendFailure(Component.literal(exception.getMessage()).withStyle(ChatFormatting.RED));
+			return 0;
+		}
+		context.getSource().sendSuccess(() -> Component.literal("Spawn do time " + team.id() + " definido para o mapa " + mapId + ".").withStyle(ChatFormatting.GREEN), false);
 		return 1;
 	}
 
 	private static int capture(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
 		ServerPlayer player = context.getSource().getPlayerOrException();
-		String mapId = StringArgumentType.getString(context, "mapId");
+		String mapId = requireValidMapId(context);
 		MapSelection selection = MapSelectionManager.get(player.getUUID());
 		if (selection == null || !selection.isComplete()) {
 			context.getSource().sendFailure(Component.literal("Marque os dois cantos da regiao com a varinha antes.").withStyle(ChatFormatting.RED));
@@ -77,6 +83,9 @@ public final class BedFightCommands {
 		}
 		try {
 			MapCaptureService.capture(mapId, context.getSource().getLevel(), selection);
+		} catch (MapCaptureException exception) {
+			context.getSource().sendFailure(Component.literal(exception.getMessage()).withStyle(ChatFormatting.RED));
+			return 0;
 		} catch (IOException exception) {
 			BedFight.LOGGER.error("Falha ao capturar o mapa {}.", mapId, exception);
 			context.getSource().sendFailure(Component.literal("Falha ao capturar o mapa, veja o console.").withStyle(ChatFormatting.RED));
@@ -86,10 +95,11 @@ public final class BedFightCommands {
 		return 1;
 	}
 
-	private static boolean hasAdminPermission(CommandSourceStack source) {
-		if (source.permissions().hasPermission(Permissions.COMMANDS_GAMEMASTER)) {
-			return true;
+	private static String requireValidMapId(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+		String mapId = StringArgumentType.getString(context, "mapId");
+		if (!VALID_MAP_ID.matcher(mapId).matches()) {
+			throw INVALID_MAP_ID.create();
 		}
-		return source.permissions().hasPermission(ADMIN_PERMISSION);
+		return mapId;
 	}
 }

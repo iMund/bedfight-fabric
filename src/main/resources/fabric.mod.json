@@ -2,7 +2,7 @@
 	"schemaVersion": 1,
 	"id": "bedfight",
 	"version": "${version}",
-	"name": "bedfight",
+	"name": "Bed Fight",
 	"description": "Bed Fight - minigame 1v1 e 2v2.",
 	"authors": [
 		"Tavares"
