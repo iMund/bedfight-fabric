@@ -115,6 +115,10 @@ public final class BedFightCommands {
 		} catch (MapCaptureException exception) {
 			context.getSource().sendFailure(Component.literal(exception.getMessage()).withStyle(ChatFormatting.RED));
 			return 0;
+		} catch (IOException exception) {
+			BedFight.LOGGER.error("Falha ao ler map.yml existente do mapa {}.", mapId, exception);
+			context.getSource().sendFailure(Component.literal("Mapa " + mapId + " ja tem um map.yml, mas ele nao pode ser lido - veja o console antes de continuar (senao o proximo salvamento apaga o que ja tinha).").withStyle(ChatFormatting.RED));
+			return 0;
 		}
 		context.getSource().sendSuccess(() -> Component.literal("Spawn do time " + team.id() + " definido para o mapa " + mapId + ".").withStyle(ChatFormatting.GREEN), false);
 		return 1;

@@ -15,6 +15,7 @@ import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.constructor.Constructor;
 import org.yaml.snakeyaml.introspector.BeanAccess;
 import org.yaml.snakeyaml.introspector.PropertyUtils;
+import org.yaml.snakeyaml.nodes.Tag;
 import org.yaml.snakeyaml.representer.Representer;
 
 /**
@@ -56,6 +57,24 @@ public final class YamlConfigLoader {
 		}
 	}
 
+	/**
+	 * Same as readIfExists, but for callers where silently falling back to a blank object is
+	 * dangerous (the caller is about to add data and save, which would overwrite whatever was
+	 * already on disk with that blank object) - returns null if the file doesn't exist yet (safe
+	 * to start blank), but rethrows if it exists and fails to parse, so the caller can abort
+	 * instead of silently destroying data.
+	 */
+	public static <T> T readExistingOrThrow(Path file, Class<T> type) throws IOException {
+		if (!Files.exists(file)) {
+			return null;
+		}
+		try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
+			return newYaml(type).load(reader);
+		} catch (RuntimeException exception) {
+			throw new IOException("Falha ao ler " + file + ": " + exception.getMessage(), exception);
+		}
+	}
+
 	public static Path configDir() {
 		return FabricLoader.getInstance().getConfigDir().resolve("bedfight");
 	}
@@ -65,7 +84,7 @@ public final class YamlConfigLoader {
 		try {
 			Files.createDirectories(file.getParent());
 			try (Writer writer = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
-				newDumper().dump(data, writer);
+				newDumper(data.getClass()).dump(data, writer);
 			}
 		} catch (IOException | RuntimeException exception) {
 			BedFight.LOGGER.error("Falha ao salvar config {}.", file, exception);
@@ -81,11 +100,18 @@ public final class YamlConfigLoader {
 		return new Yaml(constructor);
 	}
 
-	private static Yaml newDumper() {
+	private static Yaml newDumper(Class<?> type) {
 		DumperOptions options = new DumperOptions();
 		options.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);
 		options.setPrettyFlow(true);
 		Representer representer = new Representer(options);
+		// Without this, the Representer writes a "!!fully.qualified.ClassName" tag on the root
+		// object, which the Constructor then refuses to read back by default (global tags are
+		// blocked as a deserialization-safety measure) - every subsequent load silently fell back
+		// to a blank object, and the next save wiped out whatever was already on disk. Tagging the
+		// root as a plain map sidesteps this entirely and also matches what a hand-edited YAML
+		// file should look like (no Java class name visible to the admin editing it).
+		representer.addClassTag(type, Tag.MAP);
 		PropertyUtils propertyUtils = new PropertyUtils();
 		propertyUtils.setBeanAccess(BeanAccess.FIELD);
 		representer.setPropertyUtils(propertyUtils);

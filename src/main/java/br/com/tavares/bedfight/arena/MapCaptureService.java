@@ -55,7 +55,7 @@ public final class MapCaptureService {
 		YamlConfigLoader.save(dir.resolve("map.yml"), data);
 	}
 
-	public static void setSpawn(String mapId, Team team, MapSelection selection, BlockPos playerPos, float yaw, float pitch) throws MapCaptureException {
+	public static void setSpawn(String mapId, Team team, MapSelection selection, BlockPos playerPos, float yaw, float pitch) throws IOException, MapCaptureException {
 		MapData data = loadOrCreate(mapId);
 		bindOrigin(data, selection);
 
@@ -100,8 +100,10 @@ public final class MapCaptureService {
 		return null;
 	}
 
-	private static MapData loadOrCreate(String mapId) {
+	/** Never silently starts blank when the file exists but fails to parse - that would let the next save wipe out whatever was already recorded (spawns, origin) with no visible symptom besides a log line. */
+	private static MapData loadOrCreate(String mapId) throws IOException {
 		Path file = mapDir(mapId).resolve("map.yml");
-		return YamlConfigLoader.readIfExists(file, MapData.class, new MapData());
+		MapData existing = YamlConfigLoader.readExistingOrThrow(file, MapData.class);
+		return existing != null ? existing : new MapData();
 	}
 }
