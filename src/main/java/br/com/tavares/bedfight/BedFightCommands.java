@@ -44,8 +44,15 @@ public final class BedFightCommands {
 	private static final Pattern VALID_MAP_ID = Pattern.compile("[a-z0-9_-]{1,32}");
 	private static final SimpleCommandExceptionType INVALID_MAP_ID = new SimpleCommandExceptionType(
 		Component.literal("mapId invalido - use so letras minusculas, numeros, '-' e '_' (1 a 32 caracteres)."));
-	/** Well outside any grid slot (instances only ever sit at x = index * gridSpacingBlocks, always >= 0) - a safe place to build/capture a map without ever touching survival or overlapping a live match. */
-	private static final BlockPos BUILD_ZONE_ORIGIN = new BlockPos(-2000, 100, 0);
+	/**
+	 * Well outside any instance grid slot (instances only ever sit at x = index * gridSpacingBlocks,
+	 * always >= 0, z = 0) - a safe place to build/capture a map without ever touching survival or
+	 * overlapping a live match. Numbered so each map gets its own spot instead of every build landing
+	 * on top of the last one - zone N is 500 blocks further along Z than zone N-1.
+	 */
+	private static final int BUILD_ZONE_BASE_X = -2000;
+	private static final int BUILD_ZONE_Y = 100;
+	private static final int BUILD_ZONE_SPACING = 500;
 	private static final int BUILD_ZONE_PLATFORM_RADIUS = 20;
 
 	private BedFightCommands() {
@@ -78,7 +85,8 @@ public final class BedFightCommands {
 				.then(literal("reload")
 					.executes(BedFightCommands::reload))
 				.then(literal("buildzone")
-					.executes(BedFightCommands::buildZone)))
+					.then(argument("area", IntegerArgumentType.integer(0))
+						.executes(BedFightCommands::buildZone))))
 			.then(literal("join")
 				.then(literal("1v1")
 					.executes(context -> join(context, GameMode.ONE_V_ONE)))
@@ -210,23 +218,25 @@ public final class BedFightCommands {
 		return 1;
 	}
 
-	/** Teleports the admin to an isolated build platform inside bedfight:arena, far from any instance grid slot - build the map "molde" here instead of in the survival overworld, then select/setspawn/capturar from here same as always. */
+	/** Teleports the admin to build zone number "area" inside bedfight:arena - each number is its own isolated platform, 500 blocks apart, so building map 2 never lands on top of map 1. Build the map "molde" here instead of the survival overworld, then select/setspawn/capturar from here same as always. */
 	private static int buildZone(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
 		ServerPlayer player = context.getSource().getPlayerOrException();
+		int area = IntegerArgumentType.getInteger(context, "area");
 		ServerLevel arenaLevel = ArenaDimension.get(context.getSource().getServer());
 		if (arenaLevel == null) {
 			context.getSource().sendFailure(Component.literal("Dimensao bedfight:arena nao carregou.").withStyle(ChatFormatting.RED));
 			return 0;
 		}
-		if (arenaLevel.getBlockState(BUILD_ZONE_ORIGIN).isAir()) {
+		BlockPos origin = new BlockPos(BUILD_ZONE_BASE_X, BUILD_ZONE_Y, area * BUILD_ZONE_SPACING);
+		if (arenaLevel.getBlockState(origin).isAir()) {
 			for (int dx = -BUILD_ZONE_PLATFORM_RADIUS; dx <= BUILD_ZONE_PLATFORM_RADIUS; dx++) {
 				for (int dz = -BUILD_ZONE_PLATFORM_RADIUS; dz <= BUILD_ZONE_PLATFORM_RADIUS; dz++) {
-					arenaLevel.setBlock(BUILD_ZONE_ORIGIN.offset(dx, 0, dz), Blocks.GLASS.defaultBlockState(), Block.UPDATE_CLIENTS);
+					arenaLevel.setBlock(origin.offset(dx, 0, dz), Blocks.GLASS.defaultBlockState(), Block.UPDATE_CLIENTS);
 				}
 			}
 		}
-		player.teleportTo(arenaLevel, BUILD_ZONE_ORIGIN.getX() + 0.5, BUILD_ZONE_ORIGIN.getY() + 1, BUILD_ZONE_ORIGIN.getZ() + 0.5, Set.of(), player.getYRot(), player.getXRot(), false);
-		context.getSource().sendSuccess(() -> Component.literal("Teleportado pra area de construcao (fora do overworld, longe de qualquer instancia). Construa o mapa aqui e capture normalmente.").withStyle(ChatFormatting.GREEN), false);
+		player.teleportTo(arenaLevel, origin.getX() + 0.5, origin.getY() + 1, origin.getZ() + 0.5, Set.of(), player.getYRot(), player.getXRot(), false);
+		context.getSource().sendSuccess(() -> Component.literal("Teleportado pra area de construcao " + area + ". Construa o mapa aqui e capture normalmente.").withStyle(ChatFormatting.GREEN), false);
 		return 1;
 	}
 
