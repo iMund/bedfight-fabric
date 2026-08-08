@@ -60,7 +60,10 @@ Bed Fight - minigame 1v1 e 2v2. Mod Fabric.
    da dimensão `bedfight:arena`). Blocos minerados da cama inimiga ficam no inventário como recurso.
    Pode **colocar** qualquer bloco do inventário.
 6. **Morte com a própria cama viva**: perde o inventário atual (reseta), fica ~3s (valor exato a
-   configurar depois) em modo espectador, e respawna com o kit padrão de novo.
+   configurar depois) em modo espectador, e respawna com o kit padrão de novo. `KitService.giveKit`
+   já entrega o kit fixo do `kit.yml` (limpa inventário, equipa armadura nos slots certos, aplica
+   encantamentos) — falta ligar isso ao momento certo do fluxo de partida (contagem/respawn), hoje só
+   dá pra testar via `/bedfight admin testkit`.
 7. **Morte com a própria cama destruída** (eliminação final, relevante no 2v2): vira **espectador da
    partida até ela terminar** — não é kickado da arena na hora.
 8. **Desconexão durante a partida**: o personagem é removido da arena na hora. Se reconectar

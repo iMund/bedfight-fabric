@@ -11,6 +11,7 @@ import br.com.tavares.bedfight.arena.MapSelection;
 import br.com.tavares.bedfight.arena.MapSelectionManager;
 import br.com.tavares.bedfight.arena.Team;
 import br.com.tavares.bedfight.arena.WandItem;
+import br.com.tavares.bedfight.kit.KitService;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
@@ -57,7 +58,9 @@ public final class BedFightCommands {
 				.then(literal("testarena")
 					.then(argument("instancia", IntegerArgumentType.integer(0))
 						.then(argument("mapId", StringArgumentType.word())
-							.executes(BedFightCommands::testArena))))));
+							.executes(BedFightCommands::testArena))))
+				.then(literal("testkit")
+					.executes(BedFightCommands::testKit))));
 	}
 
 	private static int giveWand(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
@@ -135,6 +138,13 @@ public final class BedFightCommands {
 		ArenaSpawn spawn = ArenaInstanceService.teamSpawn(instance.get(), mapId, Team.AZUL);
 		player.teleportTo(arenaLevel, spawn.x(), spawn.y(), spawn.z(), Set.of(), spawn.yaw(), spawn.pitch(), false);
 		context.getSource().sendSuccess(() -> Component.literal("Mapa " + mapId + " colado na instancia " + index + ".").withStyle(ChatFormatting.GREEN), false);
+		return 1;
+	}
+
+	private static int testKit(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+		ServerPlayer player = context.getSource().getPlayerOrException();
+		KitService.giveKit(player);
+		context.getSource().sendSuccess(() -> Component.literal("Kit entregue (inventario resetado).").withStyle(ChatFormatting.GREEN), false);
 		return 1;
 	}
 
