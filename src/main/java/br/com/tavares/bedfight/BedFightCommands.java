@@ -12,6 +12,9 @@ import br.com.tavares.bedfight.arena.MapSelection;
 import br.com.tavares.bedfight.arena.MapSelectionManager;
 import br.com.tavares.bedfight.arena.Team;
 import br.com.tavares.bedfight.arena.WandItem;
+import br.com.tavares.bedfight.config.ArenaConfig;
+import br.com.tavares.bedfight.config.KitConfig;
+import br.com.tavares.bedfight.config.MatchConfig;
 import br.com.tavares.bedfight.kit.KitService;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
@@ -64,7 +67,9 @@ public final class BedFightCommands {
 					.then(argument("instancia", IntegerArgumentType.integer(0))
 						.executes(BedFightCommands::freeArena)))
 				.then(literal("testkit")
-					.executes(BedFightCommands::testKit))));
+					.executes(BedFightCommands::testKit))
+				.then(literal("reload")
+					.executes(BedFightCommands::reload))));
 	}
 
 	private static int giveWand(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
@@ -168,8 +173,21 @@ public final class BedFightCommands {
 
 	private static int testKit(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
 		ServerPlayer player = context.getSource().getPlayerOrException();
-		KitService.giveKit(player);
-		context.getSource().sendSuccess(() -> Component.literal("Kit entregue (inventario resetado).").withStyle(ChatFormatting.GREEN), false);
+		KitService.Result result = KitService.giveKit(player);
+		if (!result.isComplete()) {
+			context.getSource().sendFailure(Component.literal("Kit entregue com problemas: " + String.join("; ", result.failures())).withStyle(ChatFormatting.RED));
+			return result.given();
+		}
+		context.getSource().sendSuccess(() -> Component.literal("Kit entregue (" + result.given() + " itens, inventario resetado).").withStyle(ChatFormatting.GREEN), false);
+		return 1;
+	}
+
+	private static int reload(CommandContext<CommandSourceStack> context) {
+		ArenaConfig.load();
+		KitConfig.load();
+		MatchConfig.load();
+		ArenaInstancePool.init();
+		context.getSource().sendSuccess(() -> Component.literal("Configs recarregadas. O pool de instancias foi reconstruido (qualquer instancia em uso foi liberada).").withStyle(ChatFormatting.GREEN), false);
 		return 1;
 	}
 

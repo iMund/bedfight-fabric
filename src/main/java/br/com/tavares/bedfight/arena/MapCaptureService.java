@@ -10,6 +10,7 @@ import net.minecraft.core.Vec3i;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtIo;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.Container;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate;
 
 public final class MapCaptureService {
@@ -30,6 +31,11 @@ public final class MapCaptureService {
 		long volume = (long) size.getX() * size.getY() * size.getZ();
 		if (volume > MAX_VOLUME) {
 			throw new MapCaptureException("Selecao grande demais (" + volume + " blocos, limite " + MAX_VOLUME + "). Confira os cantos com a varinha antes de capturar.");
+		}
+		BlockPos container = findContainer(level, min, max);
+		if (container != null) {
+			throw new MapCaptureException("Tem um container (bau/barril/shulker/etc) em " + container.toShortString()
+				+ " dentro da selecao - remove antes de capturar, senao o conteudo fica acessivel na arena.");
 		}
 
 		MapData data = loadOrCreate(mapId);
@@ -83,6 +89,15 @@ public final class MapCaptureService {
 			throw new MapCaptureException("Essa selecao nao bate com a origem ja gravada pra esse mapa (dimensao ou canto minimo diferente). "
 				+ "Refaca a selecao com a varinha do zero, do mesmo jeito de antes, ou use um mapId novo.");
 		}
+	}
+
+	private static BlockPos findContainer(ServerLevel level, BlockPos min, BlockPos max) {
+		for (BlockPos pos : BlockPos.betweenClosed(min, max)) {
+			if (level.getBlockEntity(pos) instanceof Container) {
+				return pos.immutable();
+			}
+		}
+		return null;
 	}
 
 	private static MapData loadOrCreate(String mapId) {

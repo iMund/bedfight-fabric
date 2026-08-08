@@ -3,6 +3,8 @@ package br.com.tavares.bedfight.kit;
 import br.com.tavares.bedfight.BedFight;
 import br.com.tavares.bedfight.config.KitConfig;
 import br.com.tavares.bedfight.config.KitItem;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import net.minecraft.core.HolderGetter;
 import net.minecraft.core.RegistryAccess;
@@ -20,55 +22,102 @@ import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.equipment.Equippable;
 
 public final class KitService {
+	public record Result(int given, List<String> failures) {
+		public boolean isComplete() {
+			return failures.isEmpty();
+		}
+	}
+
 	private KitService() {
 	}
 
-	/** Clears the player's inventory/armor/offhand and gives the fixed kit from kit.yml. */
-	public static void giveKit(ServerPlayer player) {
+	/** Clears the player's inventory (including crafting grid and cursor) and gives the fixed kit from kit.yml. */
+	public static Result giveKit(ServerPlayer player) {
 		player.getInventory().clearContent();
+		player.inventoryMenu.getCraftSlots().clearContent();
+		player.containerMenu.setCarried(ItemStack.EMPTY);
 
+		List<KitItem> items = KitConfig.get().items;
+		List<String> failures = new ArrayList<>();
+		if (items.isEmpty()) {
+			failures.add("kit.yml nao tem nenhum item (config vazia ou falhou ao carregar)");
+		}
+
+		int given = 0;
+		boolean[] armorFilled = new boolean[EquipmentSlot.values().length];
 		RegistryAccess registryAccess = player.registryAccess();
-		for (KitItem kitItem : KitConfig.get().items) {
-			ItemStack stack = createStack(kitItem, registryAccess);
-			if (stack != null) {
-				giveOrEquip(player, stack);
+		for (KitItem kitItem : items) {
+			ItemStack stack = createStack(kitItem, registryAccess, failures);
+			if (stack == null) {
+				continue;
+			}
+			if (giveOrEquip(player, stack, armorFilled, failures)) {
+				given++;
 			}
 		}
+
+		player.containerMenu.broadcastChanges();
+		player.inventoryMenu.slotsChanged(player.getInventory());
+		return new Result(given, failures);
 	}
 
-	private static ItemStack createStack(KitItem kitItem, RegistryAccess registryAccess) {
-		Item item = BuiltInRegistries.ITEM.getValue(Identifier.parse(kitItem.item));
+	private static ItemStack createStack(KitItem kitItem, RegistryAccess registryAccess, List<String> failures) {
+		Identifier id = Identifier.tryParse(kitItem.item);
+		Item item = id != null ? BuiltInRegistries.ITEM.getValue(id) : Items.AIR;
 		if (item == Items.AIR) {
-			BedFight.LOGGER.warn("Item de kit desconhecido: {}", kitItem.item);
+			failures.add("item de kit desconhecido: " + kitItem.item);
 			return null;
 		}
-		ItemStack stack = new ItemStack(item, Math.max(1, kitItem.count));
-		applyEnchantments(stack, kitItem.enchantments, registryAccess);
+		int count = Math.min(Math.max(kitItem.count, 1), item.getDefaultMaxStackSize());
+		if (kitItem.count != count) {
+			failures.add("quantidade invalida (" + kitItem.count + ") pra " + kitItem.item + ", usando " + count);
+		}
+		ItemStack stack = new ItemStack(item, count);
+		applyEnchantments(stack, kitItem.enchantments, registryAccess, failures);
 		return stack;
 	}
 
-	private static void applyEnchantments(ItemStack stack, Map<String, Integer> enchantments, RegistryAccess registryAccess) {
+	private static void applyEnchantments(ItemStack stack, Map<String, Integer> enchantments, RegistryAccess registryAccess, List<String> failures) {
 		if (enchantments == null || enchantments.isEmpty()) {
 			return;
 		}
 		HolderGetter<Enchantment> enchantmentRegistry = registryAccess.lookupOrThrow(Registries.ENCHANTMENT);
 		for (Map.Entry<String, Integer> entry : enchantments.entrySet()) {
-			ResourceKey<Enchantment> key = ResourceKey.create(Registries.ENCHANTMENT, Identifier.parse(entry.getKey()));
-			enchantmentRegistry.get(key).ifPresentOrElse(
-				holder -> stack.enchant(holder, entry.getValue()),
-				() -> BedFight.LOGGER.warn("Encantamento desconhecido: {}", entry.getKey()));
+			Identifier id = Identifier.tryParse(entry.getKey());
+			if (id == null) {
+				failures.add("id de encantamento invalido: " + entry.getKey());
+				continue;
+			}
+			int level = entry.getValue();
+			if (level < 1) {
+				failures.add("nivel de encantamento invalido (" + level + ") pra " + entry.getKey());
+				continue;
+			}
+			enchantmentRegistry.get(ResourceKey.create(Registries.ENCHANTMENT, id)).ifPresentOrElse(holder -> {
+				int max = holder.value().getMaxLevel();
+				if (level > max) {
+					failures.add("nivel " + level + " de " + entry.getKey() + " acima do maximo (" + max + "), aplicando mesmo assim");
+				}
+				stack.enchant(holder, level);
+			}, () -> failures.add("encantamento desconhecido: " + entry.getKey()));
 		}
 	}
 
-	private static void giveOrEquip(ServerPlayer player, ItemStack stack) {
+	private static boolean giveOrEquip(ServerPlayer player, ItemStack stack, boolean[] armorFilled, List<String> failures) {
 		Equippable equippable = stack.get(DataComponents.EQUIPPABLE);
-		if (equippable != null) {
+		if (equippable != null && equippable.slot().getType() == EquipmentSlot.Type.HUMANOID_ARMOR) {
 			EquipmentSlot slot = equippable.slot();
-			if (slot == EquipmentSlot.HEAD || slot == EquipmentSlot.CHEST || slot == EquipmentSlot.LEGS || slot == EquipmentSlot.FEET) {
-				player.setItemSlot(slot, stack);
-				return;
+			if (armorFilled[slot.getIndex()]) {
+				failures.add("kit.yml tem mais de um item pro slot " + slot + ", ficou so o ultimo");
 			}
+			armorFilled[slot.getIndex()] = true;
+			player.setItemSlot(slot, stack);
+			return true;
 		}
-		player.getInventory().add(stack);
+		boolean added = player.getInventory().add(stack);
+		if (!added) {
+			failures.add("inventario cheio, item perdido: " + stack.getItem());
+		}
+		return added;
 	}
 }
