@@ -62,6 +62,11 @@ final class BedFightSidebar {
 		LAST_LINE_COUNT.remove(playerId);
 	}
 
+	/** In-memory tracking only survives one server run - a clean slate on shutdown avoids a stale entry skipping the show-packets on the next boot. */
+	static void resetAll() {
+		LAST_LINE_COUNT.clear();
+	}
+
 	private static Objective objective(ServerPlayer player) {
 		return new Objective(player.level().getServer().getScoreboard(), OBJECTIVE_NAME, ObjectiveCriteria.DUMMY,
 			Component.literal("BED FIGHT"), ObjectiveCriteria.RenderType.INTEGER, false, BlankFormat.INSTANCE);

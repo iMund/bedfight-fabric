@@ -83,10 +83,15 @@ public final class KitService {
 		}
 		ItemStack stack = new ItemStack(item, count);
 		applyEnchantments(stack, kitItem.enchantments, registryAccess, failures);
-		if (team != null && stack.has(DataComponents.DYED_COLOR)) {
-			stack.set(DataComponents.DYED_COLOR, new DyedItemColor(team.dyeColor().getFireworkColor()));
+		if (team != null && isLeatherArmor(item)) {
+			stack.set(DataComponents.DYED_COLOR, new DyedItemColor(team.dyeColor().getTextureDiffuseColor()));
 		}
 		return stack;
+	}
+
+	/** Undyed leather armor carries no default DYED_COLOR component in this version (rendering falls back to DyedItemColor.LEATHER_COLOR instead) - stack.has(DYED_COLOR) can't detect it, so this checks item identity directly. */
+	private static boolean isLeatherArmor(Item item) {
+		return item == Items.LEATHER_HELMET || item == Items.LEATHER_CHESTPLATE || item == Items.LEATHER_LEGGINGS || item == Items.LEATHER_BOOTS;
 	}
 
 	private static void applyEnchantments(ItemStack stack, Map<String, Integer> enchantments, RegistryAccess registryAccess, List<String> failures) {

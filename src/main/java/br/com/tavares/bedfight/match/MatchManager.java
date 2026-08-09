@@ -117,6 +117,8 @@ public final class MatchManager {
 			LAST_JOIN_ATTEMPT.clear();
 			RESPAWN_TICKS.clear();
 			RETURN_LOCATIONS.clear();
+			BedFightSidebar.resetAll();
+			BedFightDisguise.clearAll(server);
 			QUEUES.values().forEach(queue -> new ArrayList<>(queue.waiting()).forEach(queue::leave));
 			tickCounter = 0;
 		});
@@ -493,7 +495,10 @@ public final class MatchManager {
 		}
 		ArenaInstancePool.findByPosition(pos).ifPresent(instance -> {
 			if (instance.isInUse() && instance.teamOfBedBlock(pos).isPresent()) {
-				discardBedDrop(serverLevel, pos, state);
+				// AFTER fires before vanilla's own Block.playerDestroy actually spawns the drop
+				// (same tick, but earlier in the same method) - the item entity doesn't exist yet,
+				// so the discard has to run on a later tick via server.execute, not inline here.
+				serverLevel.getServer().execute(() -> discardBedDrop(serverLevel, pos, state));
 			}
 			onBedBlockBroken(instance, pos);
 		});
@@ -570,6 +575,11 @@ public final class MatchManager {
 		BedFightDisguise.revealName(player);
 		resetPlayerState(player);
 		player.setHealth(player.getMaxHealth());
+		// Kit items (wool, sword, tools) don't belong in survival - besides being out of place,
+		// team_wool leaving the arena is a free-wool duplication faucet across matches.
+		player.getInventory().clearContent();
+		player.inventoryMenu.getCraftSlots().clearContent();
+		player.containerMenu.setCarried(ItemStack.EMPTY);
 
 		ReturnLocation location = RETURN_LOCATIONS.remove(playerId);
 		MinecraftServer server = player.level().getServer();
