@@ -98,6 +98,7 @@ public final class MatchManager {
 			server.execute(() -> onDisconnect(playerId));
 		});
 		ServerTickEvents.END_SERVER_TICK.register(MatchManager::onServerTick);
+		PlayerBlockBreakEvents.BEFORE.register(MatchManager::onBeforeBedBreak);
 		PlayerBlockBreakEvents.AFTER.register(MatchManager::onBedBreakAfter);
 		ServerLivingEntityEvents.ALLOW_DEATH.register(MatchManager::onAllowDeath);
 		ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
@@ -333,28 +334,53 @@ public final class MatchManager {
 		}
 	}
 
+	/**
+	 * Any death inside a tracked match is intercepted, not just ACTIVE ones - a player who falls into
+	 * the void while still waiting/frozen in the arena must not fall through to vanilla's respawn
+	 * (that's the exact bug this whole feature exists to fix), it just doesn't have "eliminated" stakes
+	 * before the match is actually running.
+	 */
 	private static boolean onAllowDeath(LivingEntity entity, DamageSource source, float amount) {
 		if (!(entity instanceof ServerPlayer player)) {
 			return true;
 		}
 		Match match = PLAYER_MATCH.get(player.getUUID());
-		if (match == null || match.state != Match.State.ACTIVE) {
+		if (match == null) {
 			return true;
 		}
-		handlePlayerDeath(match, player);
-		return false;
+		boolean handled = switch (match.state) {
+			case ACTIVE -> handlePlayerDeath(match, player);
+			case WAITING_FOR_PLAYERS, COUNTDOWN -> handlePreMatchDeath(match, player);
+			default -> false;
+		};
+		return !handled;
+	}
+
+	/** Not in a match yet or the match already ended by the time this fires - nothing sane to do, let vanilla handle it. */
+	private static boolean handlePreMatchDeath(Match match, ServerPlayer player) {
+		Team team = match.teamOf(player.getUUID());
+		if (team == null) {
+			return false;
+		}
+		player.setHealth(player.getMaxHealth());
+		player.clearFire();
+		Optional<ArenaSpawn> spawn = ArenaInstanceService.teamSpawn(match.instance, match.mapId, team);
+		spawn.ifPresent(s -> player.teleportTo(match.arenaLevel, s.x(), s.y(), s.z(), Set.of(), s.yaw(), s.pitch(), false));
+		return true;
 	}
 
 	/**
 	 * Denying vanilla death (returning false from ALLOW_DEATH) leaves health at/below zero unless we
 	 * fix it ourselves - heal and move away from danger first, before anything else, or a void-fall
-	 * death would keep re-triggering this every tick.
+	 * death would keep re-triggering this every tick. Returns false (letting vanilla handle it after
+	 * all) if this player somehow isn't actually on the match's roster, so the caller never denies
+	 * death without also having healed.
 	 */
-	private static void handlePlayerDeath(Match match, ServerPlayer player) {
+	private static boolean handlePlayerDeath(Match match, ServerPlayer player) {
 		UUID playerId = player.getUUID();
 		Team team = match.teamOf(playerId);
 		if (team == null) {
-			return;
+			return false;
 		}
 		player.setHealth(player.getMaxHealth());
 		player.clearFire();
@@ -375,6 +401,7 @@ public final class MatchManager {
 			player.sendSystemMessage(Component.literal("Sua cama foi destruida, voce foi eliminado da partida.").withStyle(ChatFormatting.RED, ChatFormatting.BOLD));
 			checkTeamElimination(match, team);
 		}
+		return true;
 	}
 
 	private static void tickRespawns(MinecraftServer server) {
@@ -413,6 +440,22 @@ public final class MatchManager {
 			BedFight.LOGGER.warn("Kit incompleto ao renascer {}: {}", playerId, kitResult.failures());
 		}
 		player.sendSystemMessage(Component.literal("Voce renasceu!").withStyle(ChatFormatting.GREEN));
+	}
+
+	/** ArenaBlockProtection marks every bed block breakable for anyone (it doesn't know about teams) - this denies breaking your own team's bed specifically, so the only way to lose a bed is the enemy destroying it. */
+	private static boolean onBeforeBedBreak(Level level, Player player, BlockPos pos, BlockState state, BlockEntity blockEntity) {
+		if (!(level instanceof ServerLevel serverLevel) || serverLevel.dimension() != ArenaDimension.KEY || !(player instanceof ServerPlayer serverPlayer)) {
+			return true;
+		}
+		Match match = PLAYER_MATCH.get(serverPlayer.getUUID());
+		if (match == null) {
+			return true;
+		}
+		Team breakerTeam = match.teamOf(serverPlayer.getUUID());
+		return ArenaInstancePool.findByPosition(pos)
+			.flatMap(instance -> instance.teamOfBedBlock(pos))
+			.map(bedTeam -> bedTeam != breakerTeam)
+			.orElse(true);
 	}
 
 	private static void onBedBreakAfter(Level level, Player player, BlockPos pos, BlockState state, BlockEntity blockEntity) {
@@ -513,8 +556,12 @@ public final class MatchManager {
 		// Full reconnect-aware handling (rejoin an already-running ACTIVE match) isn't built yet -
 		// for now any disconnect just drops the player from the roster. A COUNTDOWN match reverts
 		// to WAITING_FOR_PLAYERS instead of ticking down short-handed, since nothing could ever
-		// refill it otherwise (findFormingMatch only matches WAITING_FOR_PLAYERS).
+		// refill it otherwise (findFormingMatch only matches WAITING_FOR_PLAYERS). An ACTIVE match
+		// whose last player on a team disconnects awards the win to the other team instead of
+		// leaving the match stuck ACTIVE forever with a permanently-unwinnable roster.
 		boolean wasCountingDown = match.state == Match.State.COUNTDOWN;
+		boolean wasActive = match.state == Match.State.ACTIVE;
+		Team team = match.teamOf(playerId);
 		match.removePlayer(playerId);
 		if (match.isEmpty()) {
 			MATCHES.remove(match);
@@ -523,6 +570,10 @@ public final class MatchManager {
 		}
 		if (wasCountingDown) {
 			revertToWaiting(match);
+			return;
+		}
+		if (wasActive && team != null && match.rosters.get(team).isEmpty()) {
+			endMatch(match, match.otherTeam(team));
 		}
 	}
 }

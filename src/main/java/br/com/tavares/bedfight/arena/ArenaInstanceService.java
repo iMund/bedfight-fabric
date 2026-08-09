@@ -1,5 +1,6 @@
 package br.com.tavares.bedfight.arena;
 
+import br.com.tavares.bedfight.BedFight;
 import br.com.tavares.bedfight.config.ArenaConfig;
 import br.com.tavares.bedfight.config.YamlConfigLoader;
 import java.io.IOException;
@@ -54,7 +55,13 @@ public final class ArenaInstanceService {
 
 		BedProtectionScanner.Result scan = BedProtectionScanner.scan(arenaLevel, instance.origin(), size);
 		instance.occupy(mapId, scan.breakableBlocks());
-		instance.setTeamBeds(assignBedsToTeams(scan.bedPositions(), instance, mapId));
+		Map<Team, Set<BlockPos>> teamBeds = assignBedsToTeams(scan.bedPositions(), instance, mapId);
+		instance.setTeamBeds(teamBeds);
+		for (Team team : Team.values()) {
+			if (teamBeds.get(team).isEmpty()) {
+				BedFight.LOGGER.warn("Nenhuma cama foi atribuida ao time {} no mapa {} - esse time fica sem cama pra defender/perder, a partida pode ficar impossivel de vencer contra ele.", team.id(), mapId);
+			}
+		}
 		return scan;
 	}
 

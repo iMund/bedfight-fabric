@@ -55,7 +55,10 @@ public final class BedProtectionScanner {
 		return new Result(breakableBlocks, Set.copyOf(beds), beds.size(), woodShell.size(), endStoneShell.size());
 	}
 
-	/** Groups individual bed blocks into physical beds (a vanilla bed is exactly 2 face-adjacent blocks) via connected components. */
+	/** North/south/east/west only, not up/down - a vanilla bed's head and foot are always on the same Y, and this avoids merging two maps' beds that happen to be stacked on different floors into one group. */
+	private static final Direction[] HORIZONTAL_DIRECTIONS = {Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST};
+
+	/** Groups individual bed blocks into physical beds (a vanilla bed is exactly 2 horizontally-adjacent blocks) via connected components. */
 	public static List<Set<BlockPos>> groupBeds(Set<BlockPos> bedPositions) {
 		List<Set<BlockPos>> groups = new ArrayList<>();
 		Set<BlockPos> visited = new HashSet<>();
@@ -69,7 +72,7 @@ public final class BedProtectionScanner {
 			group.add(start);
 			while (!queue.isEmpty()) {
 				BlockPos pos = queue.poll();
-				for (Direction direction : Direction.values()) {
+				for (Direction direction : HORIZONTAL_DIRECTIONS) {
 					BlockPos next = pos.relative(direction).immutable();
 					if (bedPositions.contains(next) && visited.add(next)) {
 						group.add(next);
