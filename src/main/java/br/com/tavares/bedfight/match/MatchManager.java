@@ -548,10 +548,14 @@ public final class MatchManager {
 		endMatch(match, match.otherTeam(deadTeam));
 	}
 
-	/** End of match: announce the winner, send everyone back to wherever they queued from, free the arena. */
+	/** End of match: announce the winner, update win streaks, send everyone back to wherever they queued from, free the arena. */
 	private static void endMatch(Match match, Team winner) {
 		match.state = Match.State.ENDED;
 		Component message = Component.literal("Time " + winner.id() + " venceu a partida!").withStyle(winner.color(), ChatFormatting.BOLD);
+		Team loser = match.otherTeam(winner);
+		match.rosters.get(winner).forEach(PlayerStatsService::recordWin);
+		match.rosters.get(loser).forEach(PlayerStatsService::recordLoss);
+		PlayerStatsService.save();
 		for (UUID playerId : match.allPlayers()) {
 			RESPAWN_TICKS.remove(playerId);
 			PLAYER_MATCH.remove(playerId);
@@ -668,13 +672,15 @@ public final class MatchManager {
 		for (UUID playerId : match.allPlayers()) {
 			ServerPlayer player = match.arenaLevel.getServer().getPlayerList().getPlayer(playerId);
 			if (player != null) {
-				BedFightSidebar.display(player, sidebarLines(match, playerId));
+				BedFightSidebar.display(player, sidebarLines(match, player));
 			}
 		}
 	}
 
-	private static List<Component> sidebarLines(Match match, UUID viewerId) {
+	private static List<Component> sidebarLines(Match match, ServerPlayer viewer) {
+		UUID viewerId = viewer.getUUID();
 		List<Component> lines = new ArrayList<>();
+		lines.add(Component.literal(viewer.getGameProfile().name()).withStyle(ChatFormatting.GRAY));
 		lines.add(Component.empty());
 		if (match.state == Match.State.WAITING_FOR_PLAYERS || match.state == Match.State.COUNTDOWN) {
 			lines.add(Component.literal("Mapa: " + match.mapId).withStyle(ChatFormatting.GRAY));
@@ -693,10 +699,12 @@ public final class MatchManager {
 				boolean alive = Boolean.TRUE.equals(match.bedAlive.get(team));
 				String mark = alive ? "✓" : "✗";
 				String suffix = team == viewerTeam ? " VOCE" : "";
-				lines.add(Component.literal(capitalize(team.id()) + ": " + mark + suffix).withStyle(team.color()));
+				String letter = team.id().substring(0, 1).toUpperCase();
+				lines.add(Component.literal(letter + " " + capitalize(team.id()) + ": " + mark + suffix).withStyle(team.color()));
 			}
 			lines.add(Component.empty());
 			lines.add(Component.literal("Kills: " + match.kills.getOrDefault(viewerId, 0)).withStyle(ChatFormatting.GRAY));
+			lines.add(Component.literal("Winstreak: " + PlayerStatsService.get(viewerId).winstreak).withStyle(ChatFormatting.GRAY));
 		}
 		return lines;
 	}

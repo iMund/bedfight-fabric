@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.numbers.BlankFormat;
 import net.minecraft.network.protocol.game.ClientboundResetScorePacket;
@@ -68,8 +69,9 @@ final class BedFightSidebar {
 	}
 
 	private static Objective objective(ServerPlayer player) {
+		Component title = Component.literal("BED FIGHT").withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD);
 		return new Objective(player.level().getServer().getScoreboard(), OBJECTIVE_NAME, ObjectiveCriteria.DUMMY,
-			Component.literal("BED FIGHT"), ObjectiveCriteria.RenderType.INTEGER, false, BlankFormat.INSTANCE);
+			title, ObjectiveCriteria.RenderType.INTEGER, false, BlankFormat.INSTANCE);
 	}
 
 	private static String lineKey(int index) {

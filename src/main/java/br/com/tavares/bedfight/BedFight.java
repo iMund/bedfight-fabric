@@ -8,6 +8,7 @@ import br.com.tavares.bedfight.config.KitConfig;
 import br.com.tavares.bedfight.config.MatchConfig;
 import br.com.tavares.bedfight.match.MatchFreeze;
 import br.com.tavares.bedfight.match.MatchManager;
+import br.com.tavares.bedfight.match.PlayerStatsService;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import org.slf4j.Logger;
@@ -23,6 +24,7 @@ public class BedFight implements ModInitializer {
 		ArenaConfig.load();
 		KitConfig.load();
 		MatchConfig.load();
+		PlayerStatsService.load();
 		ArenaInstancePool.init();
 
 		MapSelectionManager.register();
