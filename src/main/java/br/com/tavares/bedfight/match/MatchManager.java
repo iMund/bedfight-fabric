@@ -431,7 +431,12 @@ public final class MatchManager {
 			player.sendSystemMessage(Component.literal("Sua cama foi destruida, voce foi eliminado da partida.").withStyle(ChatFormatting.RED, ChatFormatting.BOLD));
 			checkTeamElimination(match, team);
 		}
-		refreshSidebar(match);
+		// checkTeamElimination may have just ended the match and sent everyone home (which hides
+		// their sidebar) - refreshing after that would re-display a phantom BED FIGHT sidebar on
+		// top of survival, since sidebarLines() doesn't have an ENDED-specific branch.
+		if (match.state != Match.State.ENDED) {
+			refreshSidebar(match);
+		}
 		return true;
 	}
 
@@ -651,6 +656,13 @@ public final class MatchManager {
 		boolean wasCountingDown = match.state == Match.State.COUNTDOWN;
 		boolean wasActive = match.state == Match.State.ACTIVE;
 		Team team = match.teamOf(playerId);
+		if (wasActive && team != null) {
+			// Quitting mid-match counts as a personal loss regardless of what happens to the rest
+			// of the team - removePlayer below takes them off the roster, so endMatch's own
+			// winner/loser recording can never see (or dodge recording a loss for) this player again.
+			PlayerStatsService.recordLoss(playerId);
+			PlayerStatsService.save();
+		}
 		match.removePlayer(playerId);
 		if (match.isEmpty()) {
 			MATCHES.remove(match);
@@ -704,8 +716,11 @@ public final class MatchManager {
 			}
 			lines.add(Component.empty());
 			lines.add(Component.literal("Kills: " + match.kills.getOrDefault(viewerId, 0)).withStyle(ChatFormatting.GRAY));
-			lines.add(Component.literal("Winstreak: " + PlayerStatsService.get(viewerId).winstreak).withStyle(ChatFormatting.GRAY));
+			lines.add(Component.literal("Winstreak: " + PlayerStatsService.winstreakOf(viewerId)).withStyle(ChatFormatting.GRAY));
 		}
+		lines.add(Component.empty());
+		lines.add(Component.literal("UB").withStyle(ChatFormatting.YELLOW, ChatFormatting.BOLD)
+			.append(Component.literal("MC").withStyle(ChatFormatting.RED, ChatFormatting.BOLD)));
 		return lines;
 	}
 
