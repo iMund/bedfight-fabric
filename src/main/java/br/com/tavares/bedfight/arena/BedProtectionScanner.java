@@ -2,9 +2,11 @@ package br.com.tavares.bedfight.arena;
 
 import br.com.tavares.bedfight.BedFight;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Predicate;
@@ -25,7 +27,7 @@ import net.minecraft.world.level.block.state.BlockState;
 public final class BedProtectionScanner {
 	private static final int MAX_SHELL_DEPTH = 4;
 
-	public record Result(Set<BlockPos> breakableBlocks, int bedCount, int woodCount, int endStoneCount) {
+	public record Result(Set<BlockPos> breakableBlocks, Set<BlockPos> bedPositions, int bedCount, int woodCount, int endStoneCount) {
 	}
 
 	private BedProtectionScanner() {
@@ -50,7 +52,34 @@ public final class BedProtectionScanner {
 				+ "A cama pode ficar indestrutivel se algum desses for zero.", origin, beds.size(), woodShell.size(), endStoneShell.size());
 		}
 
-		return new Result(breakableBlocks, beds.size(), woodShell.size(), endStoneShell.size());
+		return new Result(breakableBlocks, Set.copyOf(beds), beds.size(), woodShell.size(), endStoneShell.size());
+	}
+
+	/** Groups individual bed blocks into physical beds (a vanilla bed is exactly 2 face-adjacent blocks) via connected components. */
+	public static List<Set<BlockPos>> groupBeds(Set<BlockPos> bedPositions) {
+		List<Set<BlockPos>> groups = new ArrayList<>();
+		Set<BlockPos> visited = new HashSet<>();
+		for (BlockPos start : bedPositions) {
+			if (!visited.add(start)) {
+				continue;
+			}
+			Set<BlockPos> group = new HashSet<>();
+			Deque<BlockPos> queue = new ArrayDeque<>();
+			queue.add(start);
+			group.add(start);
+			while (!queue.isEmpty()) {
+				BlockPos pos = queue.poll();
+				for (Direction direction : Direction.values()) {
+					BlockPos next = pos.relative(direction).immutable();
+					if (bedPositions.contains(next) && visited.add(next)) {
+						group.add(next);
+						queue.add(next);
+					}
+				}
+			}
+			groups.add(group);
+		}
+		return groups;
 	}
 
 	/** Breadth-first, but never more than MAX_SHELL_DEPTH steps away from a seed - keeps a leak local instead of swallowing the island. */

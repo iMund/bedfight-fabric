@@ -5,7 +5,11 @@ import br.com.tavares.bedfight.config.YamlConfigLoader;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.EnumMap;
+import java.util.HashSet;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
 import net.minecraft.core.registries.Registries;
@@ -50,7 +54,41 @@ public final class ArenaInstanceService {
 
 		BedProtectionScanner.Result scan = BedProtectionScanner.scan(arenaLevel, instance.origin(), size);
 		instance.occupy(mapId, scan.breakableBlocks());
+		instance.setTeamBeds(assignBedsToTeams(scan.bedPositions(), instance, mapId));
 		return scan;
+	}
+
+	/** Assigns each physical bed (a connected pair of bed blocks) to whichever team's spawn it's closest to. */
+	private static Map<Team, Set<BlockPos>> assignBedsToTeams(Set<BlockPos> bedPositions, ArenaInstance instance, String mapId) {
+		Map<Team, Set<BlockPos>> teamBeds = new EnumMap<>(Team.class);
+		for (Team team : Team.values()) {
+			teamBeds.put(team, new HashSet<>());
+		}
+		Optional<ArenaSpawn> azulSpawn = teamSpawn(instance, mapId, Team.AZUL);
+		Optional<ArenaSpawn> vermelhoSpawn = teamSpawn(instance, mapId, Team.VERMELHO);
+		for (Set<BlockPos> bedGroup : BedProtectionScanner.groupBeds(bedPositions)) {
+			BlockPos anyBlock = bedGroup.iterator().next();
+			Team nearest = nearestTeam(anyBlock, azulSpawn, vermelhoSpawn);
+			if (nearest != null) {
+				teamBeds.get(nearest).addAll(bedGroup);
+			}
+		}
+		return teamBeds;
+	}
+
+	private static Team nearestTeam(BlockPos pos, Optional<ArenaSpawn> azulSpawn, Optional<ArenaSpawn> vermelhoSpawn) {
+		if (azulSpawn.isEmpty() && vermelhoSpawn.isEmpty()) {
+			return null;
+		}
+		if (azulSpawn.isEmpty()) {
+			return Team.VERMELHO;
+		}
+		if (vermelhoSpawn.isEmpty()) {
+			return Team.AZUL;
+		}
+		double distSqAzul = pos.distSqr(new BlockPos((int) azulSpawn.get().x(), (int) azulSpawn.get().y(), (int) azulSpawn.get().z()));
+		double distSqVermelho = pos.distSqr(new BlockPos((int) vermelhoSpawn.get().x(), (int) vermelhoSpawn.get().y(), (int) vermelhoSpawn.get().z()));
+		return distSqAzul <= distSqVermelho ? Team.AZUL : Team.VERMELHO;
 	}
 
 	public static void free(ArenaInstance instance) {

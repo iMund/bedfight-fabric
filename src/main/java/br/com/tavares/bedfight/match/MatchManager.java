@@ -9,38 +9,51 @@ import br.com.tavares.bedfight.arena.ArenaSpawn;
 import br.com.tavares.bedfight.arena.MapCaptureException;
 import br.com.tavares.bedfight.arena.MapRegistry;
 import br.com.tavares.bedfight.arena.Team;
+import br.com.tavares.bedfight.arena.ArenaInstancePool;
 import br.com.tavares.bedfight.config.MatchConfig;
 import br.com.tavares.bedfight.kit.KitService;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
+import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.minecraft.ChatFormatting;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.entity.ai.attributes.Attribute;
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 
 /**
- * Queue -&gt; instance/map allocation -&gt; team assignment -&gt; teleport -&gt; countdown/freeze/kit -&gt; active.
- * Death/respawn/elimination, in-match disconnect handling and end-of-match flow are not built yet
- * (see README/memory - this is the next slice on top of this one).
+ * Queue -&gt; instance/map allocation -&gt; team assignment -&gt; teleport -&gt; countdown/freeze/kit -&gt; active
+ * -&gt; death/respawn (if the team's bed is alive) or elimination (if it isn't) -&gt; end of match once a
+ * whole team is eliminated. Full end-of-match UX (return-to-lobby items/timer) is not built yet -
+ * ending a match just frees the arena and clears PLAYER_MATCH so the accounts can requeue.
  *
  * All mutable state here is only ever touched from the server thread: ServerPlayConnectionEvents.DISCONNECT
  * does NOT guarantee that on its own (it can fire from Netty's event loop on a client-initiated
@@ -62,6 +75,8 @@ public final class MatchManager {
 	private static final List<Match> MATCHES = new ArrayList<>();
 	private static final Map<UUID, Match> PLAYER_MATCH = new HashMap<>();
 	private static final Map<UUID, Long> LAST_JOIN_ATTEMPT = new HashMap<>();
+	/** Ticks left until a dead player (whose bed is still alive) respawns - absence means not waiting to respawn. */
+	private static final Map<UUID, Integer> RESPAWN_TICKS = new HashMap<>();
 	private static final Random RANDOM = new Random();
 	private static int tickCounter;
 
@@ -83,10 +98,13 @@ public final class MatchManager {
 			server.execute(() -> onDisconnect(playerId));
 		});
 		ServerTickEvents.END_SERVER_TICK.register(MatchManager::onServerTick);
+		PlayerBlockBreakEvents.AFTER.register(MatchManager::onBedBreakAfter);
+		ServerLivingEntityEvents.ALLOW_DEATH.register(MatchManager::onAllowDeath);
 		ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
 			MATCHES.clear();
 			PLAYER_MATCH.clear();
 			LAST_JOIN_ATTEMPT.clear();
+			RESPAWN_TICKS.clear();
 			QUEUES.values().forEach(queue -> new ArrayList<>(queue.waiting()).forEach(queue::leave));
 			tickCounter = 0;
 		});
@@ -273,6 +291,7 @@ public final class MatchManager {
 			}
 		}
 		tickCountdowns(server);
+		tickRespawns(server);
 	}
 
 	private static void tickCountdowns(MinecraftServer server) {
@@ -314,6 +333,152 @@ public final class MatchManager {
 		}
 	}
 
+	private static boolean onAllowDeath(LivingEntity entity, DamageSource source, float amount) {
+		if (!(entity instanceof ServerPlayer player)) {
+			return true;
+		}
+		Match match = PLAYER_MATCH.get(player.getUUID());
+		if (match == null || match.state != Match.State.ACTIVE) {
+			return true;
+		}
+		handlePlayerDeath(match, player);
+		return false;
+	}
+
+	/**
+	 * Denying vanilla death (returning false from ALLOW_DEATH) leaves health at/below zero unless we
+	 * fix it ourselves - heal and move away from danger first, before anything else, or a void-fall
+	 * death would keep re-triggering this every tick.
+	 */
+	private static void handlePlayerDeath(Match match, ServerPlayer player) {
+		UUID playerId = player.getUUID();
+		Team team = match.teamOf(playerId);
+		if (team == null) {
+			return;
+		}
+		player.setHealth(player.getMaxHealth());
+		player.clearFire();
+		player.getInventory().clearContent();
+		player.inventoryMenu.getCraftSlots().clearContent();
+		player.containerMenu.setCarried(ItemStack.EMPTY);
+		player.setGameMode(GameType.SPECTATOR);
+
+		Optional<ArenaSpawn> spawn = ArenaInstanceService.teamSpawn(match.instance, match.mapId, team);
+		spawn.ifPresent(s -> player.teleportTo(match.arenaLevel, s.x(), s.y(), s.z(), Set.of(), s.yaw(), s.pitch(), false));
+
+		if (Boolean.TRUE.equals(match.bedAlive.get(team))) {
+			int seconds = Math.clamp(MatchConfig.get().respawnDelaySeconds, 1, 60);
+			RESPAWN_TICKS.put(playerId, seconds * TICKS_PER_SECOND);
+			player.sendSystemMessage(Component.literal("Voce morreu! Renascendo em " + seconds + "s...").withStyle(ChatFormatting.RED));
+		} else {
+			match.eliminated.add(playerId);
+			player.sendSystemMessage(Component.literal("Sua cama foi destruida, voce foi eliminado da partida.").withStyle(ChatFormatting.RED, ChatFormatting.BOLD));
+			checkTeamElimination(match, team);
+		}
+	}
+
+	private static void tickRespawns(MinecraftServer server) {
+		if (RESPAWN_TICKS.isEmpty()) {
+			return;
+		}
+		Iterator<Map.Entry<UUID, Integer>> iterator = RESPAWN_TICKS.entrySet().iterator();
+		while (iterator.hasNext()) {
+			Map.Entry<UUID, Integer> entry = iterator.next();
+			int remaining = entry.getValue() - 1;
+			if (remaining > 0) {
+				entry.setValue(remaining);
+				continue;
+			}
+			iterator.remove();
+			respawnPlayer(entry.getKey(), server);
+		}
+	}
+
+	private static void respawnPlayer(UUID playerId, MinecraftServer server) {
+		Match match = PLAYER_MATCH.get(playerId);
+		ServerPlayer player = server.getPlayerList().getPlayer(playerId);
+		if (match == null || player == null || match.state != Match.State.ACTIVE) {
+			return;
+		}
+		Team team = match.teamOf(playerId);
+		if (team == null) {
+			return;
+		}
+		Optional<ArenaSpawn> spawn = ArenaInstanceService.teamSpawn(match.instance, match.mapId, team);
+		spawn.ifPresent(s -> player.teleportTo(match.arenaLevel, s.x(), s.y(), s.z(), Set.of(), s.yaw(), s.pitch(), false));
+		player.setGameMode(GameType.SURVIVAL);
+		player.setHealth(player.getMaxHealth());
+		KitService.Result kitResult = KitService.giveKit(player, team);
+		if (!kitResult.isComplete()) {
+			BedFight.LOGGER.warn("Kit incompleto ao renascer {}: {}", playerId, kitResult.failures());
+		}
+		player.sendSystemMessage(Component.literal("Voce renasceu!").withStyle(ChatFormatting.GREEN));
+	}
+
+	private static void onBedBreakAfter(Level level, Player player, BlockPos pos, BlockState state, BlockEntity blockEntity) {
+		if (!(level instanceof ServerLevel serverLevel) || serverLevel.dimension() != ArenaDimension.KEY) {
+			return;
+		}
+		ArenaInstancePool.findByPosition(pos).ifPresent(instance -> onBedBlockBroken(instance, pos));
+	}
+
+	private static void onBedBlockBroken(ArenaInstance instance, BlockPos pos) {
+		if (!instance.isInUse()) {
+			return;
+		}
+		instance.teamOfBedBlock(pos).ifPresent(team -> {
+			Match match = findMatchByInstance(instance);
+			if (match == null || match.state != Match.State.ACTIVE || !Boolean.TRUE.equals(match.bedAlive.get(team))) {
+				return;
+			}
+			match.bedAlive.put(team, false);
+			announceBedDestroyed(match, team);
+		});
+	}
+
+	private static void announceBedDestroyed(Match match, Team team) {
+		Component message = Component.literal("A cama do time " + team.id() + " foi destruida!").withStyle(team.color(), ChatFormatting.BOLD);
+		for (UUID playerId : match.allPlayers()) {
+			ServerPlayer player = match.arenaLevel.getServer().getPlayerList().getPlayer(playerId);
+			if (player != null) {
+				player.sendSystemMessage(message);
+			}
+		}
+	}
+
+	private static void checkTeamElimination(Match match, Team deadTeam) {
+		if (!match.isTeamEliminated(deadTeam)) {
+			return;
+		}
+		endMatch(match, match.otherTeam(deadTeam));
+	}
+
+	/** Minimal end-of-match: announce, free the arena, let the accounts requeue. No return-to-lobby UX yet - that's a separate follow-up (bedfight-fabric doesn't own the lobby). */
+	private static void endMatch(Match match, Team winner) {
+		match.state = Match.State.ENDED;
+		Component message = Component.literal("Time " + winner.id() + " venceu a partida!").withStyle(winner.color(), ChatFormatting.BOLD);
+		for (UUID playerId : match.allPlayers()) {
+			RESPAWN_TICKS.remove(playerId);
+			PLAYER_MATCH.remove(playerId);
+			ServerPlayer player = match.arenaLevel.getServer().getPlayerList().getPlayer(playerId);
+			if (player != null) {
+				player.sendSystemMessage(message);
+				player.setGameMode(GameType.SPECTATOR);
+			}
+		}
+		MATCHES.remove(match);
+		ArenaInstanceService.free(match.instance);
+	}
+
+	private static Match findMatchByInstance(ArenaInstance instance) {
+		for (Match match : MATCHES) {
+			if (match.instance == instance) {
+				return match;
+			}
+		}
+		return null;
+	}
+
 	private static void drainQueue(GameMode mode, MinecraftServer server) {
 		MatchQueue queue = QUEUES.get(mode);
 		for (UUID playerId : List.copyOf(queue.waiting())) {
@@ -340,6 +505,7 @@ public final class MatchManager {
 			queue.leave(playerId);
 		}
 		LAST_JOIN_ATTEMPT.remove(playerId);
+		RESPAWN_TICKS.remove(playerId);
 		Match match = PLAYER_MATCH.remove(playerId);
 		if (match == null) {
 			return;

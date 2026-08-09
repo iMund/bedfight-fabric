@@ -4,8 +4,10 @@ import br.com.tavares.bedfight.arena.ArenaInstance;
 import br.com.tavares.bedfight.arena.Team;
 import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import net.minecraft.server.level.ServerLevel;
 
@@ -23,6 +25,9 @@ final class Match {
 	final String mapId;
 	final ServerLevel arenaLevel;
 	final Map<Team, List<UUID>> rosters = new EnumMap<>(Team.class);
+	final Map<Team, Boolean> bedAlive = new EnumMap<>(Team.class);
+	/** Players who died after their team's bed was already destroyed - out for the rest of this match. */
+	final Set<UUID> eliminated = new HashSet<>();
 	State state = State.WAITING_FOR_PLAYERS;
 	int ticksInState;
 	int countdownTicks;
@@ -34,6 +39,8 @@ final class Match {
 		this.arenaLevel = arenaLevel;
 		rosters.put(Team.AZUL, new ArrayList<>());
 		rosters.put(Team.VERMELHO, new ArrayList<>());
+		bedAlive.put(Team.AZUL, true);
+		bedAlive.put(Team.VERMELHO, true);
 	}
 
 	int playerCount() {
@@ -58,6 +65,7 @@ final class Match {
 		for (List<UUID> roster : rosters.values()) {
 			removed |= roster.remove(playerId);
 		}
+		eliminated.remove(playerId);
 		return removed;
 	}
 
@@ -78,5 +86,15 @@ final class Match {
 			}
 		}
 		return null;
+	}
+
+	/** True once every player on this team has died after their bed was already gone - the other team wins. */
+	boolean isTeamEliminated(Team team) {
+		List<UUID> roster = rosters.get(team);
+		return !roster.isEmpty() && eliminated.containsAll(roster);
+	}
+
+	Team otherTeam(Team team) {
+		return team == Team.AZUL ? Team.VERMELHO : Team.AZUL;
 	}
 }
