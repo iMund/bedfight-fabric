@@ -9,7 +9,6 @@ import br.com.tavares.bedfight.arena.ArenaSpawn;
 import br.com.tavares.bedfight.arena.MapCaptureException;
 import br.com.tavares.bedfight.arena.MapRegistry;
 import br.com.tavares.bedfight.arena.Team;
-import br.com.tavares.bedfight.arena.ArenaInstancePool;
 import br.com.tavares.bedfight.config.MatchConfig;
 import br.com.tavares.bedfight.kit.KitService;
 import java.io.IOException;
@@ -33,27 +32,33 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.GameType;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.entity.ai.attributes.Attribute;
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.entity.EntityTypeTest;
+import net.minecraft.world.level.storage.LevelData;
+import net.minecraft.world.phys.AABB;
 
 /**
  * Queue -&gt; instance/map allocation -&gt; team assignment -&gt; teleport -&gt; countdown/freeze/kit -&gt; active
  * -&gt; death/respawn (if the team's bed is alive) or elimination (if it isn't) -&gt; end of match once a
- * whole team is eliminated. Full end-of-match UX (return-to-lobby items/timer) is not built yet -
- * ending a match just frees the arena and clears PLAYER_MATCH so the accounts can requeue.
+ * whole team is eliminated, which teleports everyone back to wherever they queued from.
  *
  * All mutable state here is only ever touched from the server thread: ServerPlayConnectionEvents.DISCONNECT
  * does NOT guarantee that on its own (it can fire from Netty's event loop on a client-initiated
@@ -77,8 +82,13 @@ public final class MatchManager {
 	private static final Map<UUID, Long> LAST_JOIN_ATTEMPT = new HashMap<>();
 	/** Ticks left until a dead player (whose bed is still alive) respawns - absence means not waiting to respawn. */
 	private static final Map<UUID, Integer> RESPAWN_TICKS = new HashMap<>();
+	/** Where a player was standing right before they queued - restored when their match ends, so bedfight-fabric never has to know where "the lobby" actually is. */
+	private static final Map<UUID, ReturnLocation> RETURN_LOCATIONS = new HashMap<>();
 	private static final Random RANDOM = new Random();
 	private static int tickCounter;
+
+	private record ReturnLocation(ResourceKey<Level> dimension, double x, double y, double z, float yaw, float pitch) {
+	}
 
 	static {
 		for (GameMode mode : GameMode.values()) {
@@ -94,8 +104,8 @@ public final class MatchManager {
 
 	public static void register() {
 		ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
-			UUID playerId = handler.getPlayer().getUUID();
-			server.execute(() -> onDisconnect(playerId));
+			ServerPlayer player = handler.getPlayer();
+			server.execute(() -> onDisconnect(player));
 		});
 		ServerTickEvents.END_SERVER_TICK.register(MatchManager::onServerTick);
 		PlayerBlockBreakEvents.BEFORE.register(MatchManager::onBeforeBedBreak);
@@ -106,6 +116,7 @@ public final class MatchManager {
 			PLAYER_MATCH.clear();
 			LAST_JOIN_ATTEMPT.clear();
 			RESPAWN_TICKS.clear();
+			RETURN_LOCATIONS.clear();
 			QUEUES.values().forEach(queue -> new ArrayList<>(queue.waiting()).forEach(queue::leave));
 			tickCounter = 0;
 		});
@@ -122,6 +133,7 @@ public final class MatchManager {
 			return new JoinResult(false, false, "Aguarde um pouco antes de tentar de novo.");
 		}
 		LAST_JOIN_ATTEMPT.put(playerId, now);
+		RETURN_LOCATIONS.put(playerId, captureReturnLocation(player));
 
 		JoinResult result = attemptPlacement(player, mode, server);
 		if (result.retryable()) {
@@ -139,6 +151,10 @@ public final class MatchManager {
 	/** How many matches are forming or running - reload guards on this to avoid corrupting a live match. */
 	public static int activeMatchCount() {
 		return MATCHES.size();
+	}
+
+	private static ReturnLocation captureReturnLocation(ServerPlayer player) {
+		return new ReturnLocation(player.level().dimension(), player.getX(), player.getY(), player.getZ(), player.getYRot(), player.getXRot());
 	}
 
 	private static JoinResult attemptPlacement(ServerPlayer player, GameMode mode, MinecraftServer server) {
@@ -188,6 +204,8 @@ public final class MatchManager {
 		ArenaSpawn s = spawn.get();
 		player.teleportTo(arenaLevel, s.x(), s.y(), s.z(), Set.of(), s.yaw(), s.pitch(), false);
 		resetPlayerState(player);
+		BedFightDisguise.hideName(player);
+		refreshSidebar(match);
 
 		if (match.isFull()) {
 			startCountdown(match);
@@ -213,6 +231,7 @@ public final class MatchManager {
 			freeze(player);
 			player.sendSystemMessage(Component.literal("Partida comecando em " + seconds + "s...").withStyle(ChatFormatting.GOLD));
 		}
+		refreshSidebar(match);
 	}
 
 	private static void activateMatch(Match match) {
@@ -224,8 +243,10 @@ public final class MatchManager {
 				continue;
 			}
 			unfreeze(player);
+			BedFightDisguise.revealName(player);
 			player.sendSystemMessage(Component.literal("Vai!").withStyle(ChatFormatting.GREEN, ChatFormatting.BOLD));
 		}
+		refreshSidebar(match);
 	}
 
 	/** A disconnect mid-countdown leaves the match short-handed with no way to ever refill it (findFormingMatch only matches WAITING_FOR_PLAYERS) - revert instead of leaving it stuck forever. */
@@ -239,6 +260,7 @@ public final class MatchManager {
 				player.sendSystemMessage(Component.literal("Um jogador saiu, esperando completar de novo...").withStyle(ChatFormatting.YELLOW));
 			}
 		}
+		refreshSidebar(match);
 	}
 
 	/** Other server systems (lobby protection, speed boosts) leave their state on the player when they're pulled into the arena mid-dimension-change - force a clean slate rather than relying on those systems noticing they've left. */
@@ -308,6 +330,8 @@ public final class MatchManager {
 			match.ticksInState++;
 			if (match.ticksInState >= match.countdownTicks) {
 				activateMatch(match);
+			} else if (match.ticksInState % TICKS_PER_SECOND == 0) {
+				refreshSidebar(match);
 			}
 		}
 	}
@@ -349,7 +373,7 @@ public final class MatchManager {
 			return true;
 		}
 		boolean handled = switch (match.state) {
-			case ACTIVE -> handlePlayerDeath(match, player);
+			case ACTIVE -> handlePlayerDeath(match, player, source);
 			case WAITING_FOR_PLAYERS, COUNTDOWN -> handlePreMatchDeath(match, player);
 			default -> false;
 		};
@@ -376,7 +400,7 @@ public final class MatchManager {
 	 * all) if this player somehow isn't actually on the match's roster, so the caller never denies
 	 * death without also having healed.
 	 */
-	private static boolean handlePlayerDeath(Match match, ServerPlayer player) {
+	private static boolean handlePlayerDeath(Match match, ServerPlayer player, DamageSource source) {
 		UUID playerId = player.getUUID();
 		Team team = match.teamOf(playerId);
 		if (team == null) {
@@ -388,6 +412,10 @@ public final class MatchManager {
 		player.inventoryMenu.getCraftSlots().clearContent();
 		player.containerMenu.setCarried(ItemStack.EMPTY);
 		player.setGameMode(GameType.SPECTATOR);
+
+		if (source.getEntity() instanceof ServerPlayer attacker && attacker != player && match.teamOf(attacker.getUUID()) != null) {
+			match.kills.merge(attacker.getUUID(), 1, Integer::sum);
+		}
 
 		Optional<ArenaSpawn> spawn = ArenaInstanceService.teamSpawn(match.instance, match.mapId, team);
 		spawn.ifPresent(s -> player.teleportTo(match.arenaLevel, s.x(), s.y(), s.z(), Set.of(), s.yaw(), s.pitch(), false));
@@ -401,6 +429,7 @@ public final class MatchManager {
 			player.sendSystemMessage(Component.literal("Sua cama foi destruida, voce foi eliminado da partida.").withStyle(ChatFormatting.RED, ChatFormatting.BOLD));
 			checkTeamElimination(match, team);
 		}
+		refreshSidebar(match);
 		return true;
 	}
 
@@ -462,7 +491,24 @@ public final class MatchManager {
 		if (!(level instanceof ServerLevel serverLevel) || serverLevel.dimension() != ArenaDimension.KEY) {
 			return;
 		}
-		ArenaInstancePool.findByPosition(pos).ifPresent(instance -> onBedBlockBroken(instance, pos));
+		ArenaInstancePool.findByPosition(pos).ifPresent(instance -> {
+			if (instance.isInUse() && instance.teamOfBedBlock(pos).isPresent()) {
+				discardBedDrop(serverLevel, pos, state);
+			}
+			onBedBlockBroken(instance, pos);
+		});
+	}
+
+	/** Vanilla always drops the bed item when it's broken - a bed's only point in this minigame is the shell around it, not a craftable reward, so the drop is discarded right after vanilla spawns it. */
+	private static void discardBedDrop(ServerLevel level, BlockPos pos, BlockState state) {
+		Item bedItem = state.getBlock().asItem();
+		if (bedItem == Items.AIR) {
+			return;
+		}
+		AABB box = new AABB(pos).inflate(1.5);
+		for (ItemEntity itemEntity : level.getEntities(EntityTypeTest.forClass(ItemEntity.class), box, entity -> entity.getItem().is(bedItem))) {
+			itemEntity.discard();
+		}
 	}
 
 	private static void onBedBlockBroken(ArenaInstance instance, BlockPos pos) {
@@ -476,6 +522,7 @@ public final class MatchManager {
 			}
 			match.bedAlive.put(team, false);
 			announceBedDestroyed(match, team);
+			refreshSidebar(match);
 		});
 	}
 
@@ -496,7 +543,7 @@ public final class MatchManager {
 		endMatch(match, match.otherTeam(deadTeam));
 	}
 
-	/** Minimal end-of-match: announce, free the arena, let the accounts requeue. No return-to-lobby UX yet - that's a separate follow-up (bedfight-fabric doesn't own the lobby). */
+	/** End of match: announce the winner, send everyone back to wherever they queued from, free the arena. */
 	private static void endMatch(Match match, Team winner) {
 		match.state = Match.State.ENDED;
 		Component message = Component.literal("Time " + winner.id() + " venceu a partida!").withStyle(winner.color(), ChatFormatting.BOLD);
@@ -506,11 +553,35 @@ public final class MatchManager {
 			ServerPlayer player = match.arenaLevel.getServer().getPlayerList().getPlayer(playerId);
 			if (player != null) {
 				player.sendSystemMessage(message);
-				player.setGameMode(GameType.SPECTATOR);
+				returnPlayer(player);
+			} else {
+				RETURN_LOCATIONS.remove(playerId);
+				BedFightSidebar.forget(playerId);
 			}
 		}
 		MATCHES.remove(match);
 		ArenaInstanceService.free(match.instance);
+	}
+
+	/** Sends a player back to wherever they were standing when they queued, resetting them to a clean survival state - falls back to the overworld's spawn if that location was never captured (e.g. a server restart mid-match). */
+	private static void returnPlayer(ServerPlayer player) {
+		UUID playerId = player.getUUID();
+		BedFightSidebar.hide(player);
+		BedFightDisguise.revealName(player);
+		resetPlayerState(player);
+		player.setHealth(player.getMaxHealth());
+
+		ReturnLocation location = RETURN_LOCATIONS.remove(playerId);
+		MinecraftServer server = player.level().getServer();
+		ServerLevel destination = location != null ? server.getLevel(location.dimension()) : null;
+		if (destination != null) {
+			player.teleportTo(destination, location.x(), location.y(), location.z(), Set.of(), location.yaw(), location.pitch(), false);
+			return;
+		}
+		ServerLevel overworld = server.overworld();
+		LevelData.RespawnData respawnData = overworld.getRespawnData();
+		BlockPos spawn = respawnData.pos();
+		player.teleportTo(overworld, spawn.getX() + 0.5, spawn.getY(), spawn.getZ() + 0.5, Set.of(), respawnData.yaw(), respawnData.pitch(), false);
 	}
 
 	private static Match findMatchByInstance(ArenaInstance instance) {
@@ -543,12 +614,16 @@ public final class MatchManager {
 		}
 	}
 
-	private static void onDisconnect(UUID playerId) {
+	private static void onDisconnect(ServerPlayer player) {
+		UUID playerId = player.getUUID();
 		for (MatchQueue queue : QUEUES.values()) {
 			queue.leave(playerId);
 		}
 		LAST_JOIN_ATTEMPT.remove(playerId);
 		RESPAWN_TICKS.remove(playerId);
+		RETURN_LOCATIONS.remove(playerId);
+		BedFightSidebar.forget(playerId);
+		BedFightDisguise.revealName(player);
 		Match match = PLAYER_MATCH.remove(playerId);
 		if (match == null) {
 			return;
@@ -574,6 +649,49 @@ public final class MatchManager {
 		}
 		if (wasActive && team != null && match.rosters.get(team).isEmpty()) {
 			endMatch(match, match.otherTeam(team));
+		} else {
+			refreshSidebar(match);
 		}
+	}
+
+	private static void refreshSidebar(Match match) {
+		for (UUID playerId : match.allPlayers()) {
+			ServerPlayer player = match.arenaLevel.getServer().getPlayerList().getPlayer(playerId);
+			if (player != null) {
+				BedFightSidebar.display(player, sidebarLines(match, playerId));
+			}
+		}
+	}
+
+	private static List<Component> sidebarLines(Match match, UUID viewerId) {
+		List<Component> lines = new ArrayList<>();
+		lines.add(Component.empty());
+		if (match.state == Match.State.WAITING_FOR_PLAYERS || match.state == Match.State.COUNTDOWN) {
+			lines.add(Component.literal("Mapa: " + match.mapId).withStyle(ChatFormatting.GRAY));
+			lines.add(Component.literal("Modo: " + match.mode.id()).withStyle(ChatFormatting.GRAY));
+			lines.add(Component.literal("Jogadores: " + match.playerCount() + "/" + match.mode.totalPlayers()).withStyle(ChatFormatting.GRAY));
+			lines.add(Component.empty());
+			if (match.state == Match.State.COUNTDOWN) {
+				int secondsLeft = Math.max(0, (match.countdownTicks - match.ticksInState + TICKS_PER_SECOND - 1) / TICKS_PER_SECOND);
+				lines.add(Component.literal("Inicia em: " + secondsLeft + "s").withStyle(ChatFormatting.YELLOW));
+			} else {
+				lines.add(Component.literal("Aguardando...").withStyle(ChatFormatting.YELLOW));
+			}
+		} else {
+			Team viewerTeam = match.teamOf(viewerId);
+			for (Team team : Team.values()) {
+				boolean alive = Boolean.TRUE.equals(match.bedAlive.get(team));
+				String mark = alive ? "✓" : "✗";
+				String suffix = team == viewerTeam ? " VOCE" : "";
+				lines.add(Component.literal(capitalize(team.id()) + ": " + mark + suffix).withStyle(team.color()));
+			}
+			lines.add(Component.empty());
+			lines.add(Component.literal("Kills: " + match.kills.getOrDefault(viewerId, 0)).withStyle(ChatFormatting.GRAY));
+		}
+		return lines;
+	}
+
+	private static String capitalize(String value) {
+		return value.isEmpty() ? value : Character.toUpperCase(value.charAt(0)) + value.substring(1);
 	}
 }

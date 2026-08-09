@@ -4,6 +4,7 @@ import br.com.tavares.bedfight.arena.ArenaInstance;
 import br.com.tavares.bedfight.arena.Team;
 import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -28,6 +29,7 @@ final class Match {
 	final Map<Team, Boolean> bedAlive = new EnumMap<>(Team.class);
 	/** Players who died after their team's bed was already destroyed - out for the rest of this match. */
 	final Set<UUID> eliminated = new HashSet<>();
+	final Map<UUID, Integer> kills = new HashMap<>();
 	State state = State.WAITING_FOR_PLAYERS;
 	int ticksInState;
 	int countdownTicks;

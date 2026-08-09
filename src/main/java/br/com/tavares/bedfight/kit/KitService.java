@@ -15,9 +15,11 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.item.DyeColor;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.component.DyedItemColor;
 import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.equipment.Equippable;
 
@@ -66,7 +68,7 @@ public final class KitService {
 	private static ItemStack createStack(KitItem kitItem, Team team, RegistryAccess registryAccess, List<String> failures) {
 		Item item;
 		if (TEAM_WOOL_ID.equals(kitItem.item)) {
-			item = team == Team.VERMELHO ? Items.WOOL.red() : Items.WOOL.blue();
+			item = Items.WOOL.pick(team != null ? team.dyeColor() : DyeColor.WHITE);
 		} else {
 			Identifier id = Identifier.tryParse(kitItem.item);
 			item = id != null ? BuiltInRegistries.ITEM.getValue(id) : Items.AIR;
@@ -81,6 +83,9 @@ public final class KitService {
 		}
 		ItemStack stack = new ItemStack(item, count);
 		applyEnchantments(stack, kitItem.enchantments, registryAccess, failures);
+		if (team != null && stack.has(DataComponents.DYED_COLOR)) {
+			stack.set(DataComponents.DYED_COLOR, new DyedItemColor(team.dyeColor().getFireworkColor()));
+		}
 		return stack;
 	}
 
