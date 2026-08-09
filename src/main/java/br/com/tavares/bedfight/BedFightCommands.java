@@ -199,7 +199,7 @@ public final class BedFightCommands {
 
 	private static int testKit(CommandContext<CommandSourceStack> context, Team team) throws CommandSyntaxException {
 		ServerPlayer player = context.getSource().getPlayerOrException();
-		KitService.Result result = KitService.giveKit(player, team);
+		KitService.Result result = KitService.giveKit(player, team, false);
 		if (!result.isComplete()) {
 			context.getSource().sendFailure(Component.literal("Kit entregue com problemas: " + String.join("; ", result.failures())).withStyle(ChatFormatting.RED));
 			return result.given();
