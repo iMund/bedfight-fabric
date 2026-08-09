@@ -31,14 +31,24 @@ final class BedFightSidebar {
 	private BedFightSidebar() {
 	}
 
-	/** Shows the sidebar (sending the objective/display packets once) if it isn't already up for this player, then (re)writes its lines - safe to call on every refresh regardless of whether this is the first time. */
+	/**
+	 * Shows the sidebar and (re)writes its lines - safe to call on every refresh regardless of
+	 * whether this is the first time. The objective itself (METHOD_ADD) is only ever sent once per
+	 * player, since re-adding an objective that's already registered client-side is invalid, but the
+	 * DisplaySlot assignment is re-sent on every single call: a separate survival-sidebar mod on this
+	 * server keeps re-asserting its own objective onto the same client-side SIDEBAR slot on its own
+	 * schedule, and only re-sending the score lines (not the slot assignment) here meant bedfight's
+	 * sidebar could get silently evicted the moment that other mod's own refresh ran, with nothing
+	 * ever winning it back - the whole point of calling this periodically is to keep re-claiming the
+	 * slot, so skipping that packet on repeat calls defeated the fix entirely.
+	 */
 	static void display(ServerPlayer player, List<Component> lines) {
+		Objective objective = objective(player);
 		if (!LAST_LINE_COUNT.containsKey(player.getUUID())) {
-			Objective objective = objective(player);
 			player.connection.send(new ClientboundSetObjectivePacket(objective, ClientboundSetObjectivePacket.METHOD_ADD));
-			player.connection.send(new ClientboundSetDisplayObjectivePacket(DisplaySlot.SIDEBAR, objective));
 			LAST_LINE_COUNT.put(player.getUUID(), 0);
 		}
+		player.connection.send(new ClientboundSetDisplayObjectivePacket(DisplaySlot.SIDEBAR, objective));
 		int count = Math.min(lines.size(), MAX_LINES);
 		int score = count;
 		for (int i = 0; i < count; i++) {

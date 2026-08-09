@@ -16,7 +16,6 @@ import br.com.tavares.bedfight.config.ArenaConfig;
 import br.com.tavares.bedfight.config.KitConfig;
 import br.com.tavares.bedfight.config.MatchConfig;
 import br.com.tavares.bedfight.kit.KitService;
-import br.com.tavares.bedfight.match.GameMode;
 import br.com.tavares.bedfight.match.MatchManager;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
@@ -92,10 +91,7 @@ public final class BedFightCommands {
 					.then(argument("area", IntegerArgumentType.integer(0))
 						.executes(BedFightCommands::buildZone))))
 			.then(literal("join")
-				.then(literal("1v1")
-					.executes(context -> join(context, GameMode.ONE_V_ONE)))
-				.then(literal("2v2")
-					.executes(context -> join(context, GameMode.TWO_V_TWO)))));
+				.executes(BedFightCommands::openJoinMenu)));
 	}
 
 	private static int giveWand(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
@@ -248,15 +244,10 @@ public final class BedFightCommands {
 		return 1;
 	}
 
-	private static int join(CommandContext<CommandSourceStack> context, GameMode mode) throws CommandSyntaxException {
+	private static int openJoinMenu(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
 		ServerPlayer player = context.getSource().getPlayerOrException();
-		MatchManager.JoinResult result = MatchManager.join(player, mode, context.getSource().getServer());
-		if (result.joined()) {
-			context.getSource().sendSuccess(() -> Component.literal(result.message()).withStyle(ChatFormatting.GREEN), false);
-			return 1;
-		}
-		context.getSource().sendFailure(Component.literal(result.message()).withStyle(ChatFormatting.YELLOW));
-		return 0;
+		BedFightJoinMenu.open(player);
+		return 1;
 	}
 
 	private static String requireValidMapId(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {

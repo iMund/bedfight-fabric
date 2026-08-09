@@ -31,6 +31,8 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ClientboundSetTitleTextPacket;
+import net.minecraft.network.protocol.game.ClientboundSetTitlesAnimationPacket;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
@@ -75,6 +77,14 @@ public final class MatchManager {
 	private static final double FREEZE_SPEED_PENALTY = -1024.0;
 	/** How far a frozen player can drift from their spawn (teammates overlapping and pushing each other) before getting snapped back. */
 	private static final double FREEZE_DRIFT_TOLERANCE = 1.5;
+	/**
+	 * Re-broadcast every in-progress match's sidebar this often, not just at lifecycle events - a
+	 * separate survival-sidebar mod on this server keeps re-asserting its own objective onto the
+	 * same client-side SIDEBAR display slot on its own schedule, and whichever mod sends last wins.
+	 * Refreshing frequently is how bedfight's sidebar stays the one visibly showing for the whole
+	 * match instead of losing that race and never appearing to actually be "there".
+	 */
+	private static final int SIDEBAR_REFRESH_INTERVAL_TICKS = 20;
 
 	private static final Map<GameMode, MatchQueue> QUEUES = new EnumMap<>(GameMode.class);
 	private static final List<Match> MATCHES = new ArrayList<>();
@@ -82,6 +92,8 @@ public final class MatchManager {
 	private static final Map<UUID, Long> LAST_JOIN_ATTEMPT = new HashMap<>();
 	/** Ticks left until a dead player (whose bed is still alive) respawns - absence means not waiting to respawn. */
 	private static final Map<UUID, Integer> RESPAWN_TICKS = new HashMap<>();
+	/** Ticks left before a player who just finished a match is sent back - lets them see the win/loss message and result before the teleport, instead of it happening instantly. */
+	private static final Map<UUID, Integer> END_MATCH_TICKS = new HashMap<>();
 	/** Where a player was standing right before they queued - restored when their match ends, so bedfight-fabric never has to know where "the lobby" actually is. */
 	private static final Map<UUID, ReturnLocation> RETURN_LOCATIONS = new HashMap<>();
 	private static final Random RANDOM = new Random();
@@ -116,6 +128,7 @@ public final class MatchManager {
 			PLAYER_MATCH.clear();
 			LAST_JOIN_ATTEMPT.clear();
 			RESPAWN_TICKS.clear();
+			END_MATCH_TICKS.clear();
 			RETURN_LOCATIONS.clear();
 			BedFightSidebar.resetAll();
 			BedFightDisguise.clearAll(server);
@@ -231,14 +244,15 @@ public final class MatchManager {
 				BedFight.LOGGER.warn("Kit incompleto pra {} no inicio da partida: {}", playerId, kitResult.failures());
 			}
 			freeze(player);
-			player.sendSystemMessage(Component.literal("Partida comecando em " + seconds + "s...").withStyle(ChatFormatting.GOLD));
 		}
+		announceCountdownTick(match, seconds);
 		refreshSidebar(match);
 	}
 
 	private static void activateMatch(Match match) {
 		match.state = Match.State.ACTIVE;
 		match.ticksInState = 0;
+		Component message = Component.literal("VAI!").withStyle(ChatFormatting.GREEN, ChatFormatting.BOLD);
 		for (UUID playerId : match.allPlayers()) {
 			ServerPlayer player = match.arenaLevel.getServer().getPlayerList().getPlayer(playerId);
 			if (player == null) {
@@ -246,9 +260,29 @@ public final class MatchManager {
 			}
 			unfreeze(player);
 			BedFightDisguise.revealName(player);
-			player.sendSystemMessage(Component.literal("Vai!").withStyle(ChatFormatting.GREEN, ChatFormatting.BOLD));
+			player.sendSystemMessage(message);
+			sendTitle(player, message, 0, 20, 10);
 		}
 		refreshSidebar(match);
+	}
+
+	/** Chat line + big on-screen number, once per second while the countdown counts down - matches the reference server's cadence instead of a single "starting in Ns" message. */
+	private static void announceCountdownTick(Match match, int secondsLeft) {
+		String unit = secondsLeft == 1 ? "segundo" : "segundos";
+		Component chat = Component.literal("O jogo inicia em " + secondsLeft + " " + unit + "!").withStyle(ChatFormatting.YELLOW);
+		Component title = Component.literal(String.valueOf(secondsLeft)).withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD);
+		for (UUID playerId : match.allPlayers()) {
+			ServerPlayer player = match.arenaLevel.getServer().getPlayerList().getPlayer(playerId);
+			if (player != null) {
+				player.sendSystemMessage(chat);
+				sendTitle(player, title, 0, 25, 5);
+			}
+		}
+	}
+
+	private static void sendTitle(ServerPlayer player, Component title, int fadeInTicks, int stayTicks, int fadeOutTicks) {
+		player.connection.send(new ClientboundSetTitlesAnimationPacket(fadeInTicks, stayTicks, fadeOutTicks));
+		player.connection.send(new ClientboundSetTitleTextPacket(title));
 	}
 
 	/** A disconnect mid-countdown leaves the match short-handed with no way to ever refill it (findFormingMatch only matches WAITING_FOR_PLAYERS) - revert instead of leaving it stuck forever. */
@@ -315,8 +349,16 @@ public final class MatchManager {
 				drainQueue(mode, server);
 			}
 		}
+		if (tickCounter % SIDEBAR_REFRESH_INTERVAL_TICKS == 0) {
+			for (Match match : MATCHES) {
+				if (match.state != Match.State.ENDED) {
+					refreshSidebar(match);
+				}
+			}
+		}
 		tickCountdowns(server);
 		tickRespawns(server);
+		tickEndMatchReturns(server);
 	}
 
 	private static void tickCountdowns(MinecraftServer server) {
@@ -333,7 +375,30 @@ public final class MatchManager {
 			if (match.ticksInState >= match.countdownTicks) {
 				activateMatch(match);
 			} else if (match.ticksInState % TICKS_PER_SECOND == 0) {
-				refreshSidebar(match);
+				announceCountdownTick(match, (match.countdownTicks - match.ticksInState) / TICKS_PER_SECOND);
+			}
+		}
+	}
+
+	private static void tickEndMatchReturns(MinecraftServer server) {
+		if (END_MATCH_TICKS.isEmpty()) {
+			return;
+		}
+		Iterator<Map.Entry<UUID, Integer>> iterator = END_MATCH_TICKS.entrySet().iterator();
+		while (iterator.hasNext()) {
+			Map.Entry<UUID, Integer> entry = iterator.next();
+			int remaining = entry.getValue() - 1;
+			if (remaining > 0) {
+				entry.setValue(remaining);
+				continue;
+			}
+			iterator.remove();
+			ServerPlayer player = server.getPlayerList().getPlayer(entry.getKey());
+			if (player != null) {
+				returnPlayer(player);
+			} else {
+				RETURN_LOCATIONS.remove(entry.getKey());
+				BedFightSidebar.forget(entry.getKey());
 			}
 		}
 	}
@@ -553,22 +618,32 @@ public final class MatchManager {
 		endMatch(match, match.otherTeam(deadTeam));
 	}
 
-	/** End of match: announce the winner, update win streaks, send everyone back to wherever they queued from, free the arena. */
+	/** End of match: announce the winner, update win streaks, and send everyone back to wherever they queued from after a short delay so the result is actually visible first. */
 	private static void endMatch(Match match, Team winner) {
 		match.state = Match.State.ENDED;
 		Component message = Component.literal("Time " + winner.id() + " venceu a partida!").withStyle(winner.color(), ChatFormatting.BOLD);
+		Component title = Component.literal(winner.id().toUpperCase() + " VENCEU!").withStyle(winner.color(), ChatFormatting.BOLD);
 		Team loser = match.otherTeam(winner);
 		match.rosters.get(winner).forEach(PlayerStatsService::recordWin);
 		match.rosters.get(loser).forEach(PlayerStatsService::recordLoss);
 		PlayerStatsService.save();
+		int returnSeconds = Math.clamp(MatchConfig.get().endMatchChoiceSeconds, 1, 60);
+		int returnTicks = returnSeconds * TICKS_PER_SECOND;
 		for (UUID playerId : match.allPlayers()) {
 			RESPAWN_TICKS.remove(playerId);
-			PLAYER_MATCH.remove(playerId);
+			// PLAYER_MATCH deliberately stays set until returnPlayer() actually runs (not removed
+			// here) - join()/isQueued() both gate on it, so a player can't requeue mid-delay-window
+			// and get yanked into a brand new match while still standing in this one's freed arena.
 			ServerPlayer player = match.arenaLevel.getServer().getPlayerList().getPlayer(playerId);
 			if (player != null) {
 				player.sendSystemMessage(message);
-				returnPlayer(player);
+				// Stay covers roughly the whole return delay (minus a short fade buffer) so the
+				// title doesn't fade out and leave the player staring at nothing before the teleport.
+				sendTitle(player, title, 5, Math.max(10, returnTicks - 15), 15);
+				player.setGameMode(GameType.SPECTATOR);
+				END_MATCH_TICKS.put(playerId, returnTicks);
 			} else {
+				PLAYER_MATCH.remove(playerId);
 				RETURN_LOCATIONS.remove(playerId);
 				BedFightSidebar.forget(playerId);
 			}
@@ -580,6 +655,7 @@ public final class MatchManager {
 	/** Sends a player back to wherever they were standing when they queued, resetting them to a clean survival state - falls back to the overworld's spawn if that location was never captured (e.g. a server restart mid-match). */
 	private static void returnPlayer(ServerPlayer player) {
 		UUID playerId = player.getUUID();
+		PLAYER_MATCH.remove(playerId);
 		BedFightSidebar.hide(player);
 		BedFightDisguise.revealName(player);
 		resetPlayerState(player);
@@ -640,6 +716,15 @@ public final class MatchManager {
 		}
 		LAST_JOIN_ATTEMPT.remove(playerId);
 		RESPAWN_TICKS.remove(playerId);
+		if (END_MATCH_TICKS.remove(playerId) != null) {
+			// Mid-return-delay disconnect: their match already ended and its arena was already
+			// freed by endMatch - finish returning them now (clears the kit, resets gamemode,
+			// teleports to their saved spot, clears PLAYER_MATCH) instead of leaving them stuck
+			// offline as a spectator in a freed (possibly by-then-repasted) arena with match items
+			// still in their inventory for whenever they log back in.
+			returnPlayer(player);
+			return;
+		}
 		RETURN_LOCATIONS.remove(playerId);
 		BedFightSidebar.forget(playerId);
 		BedFightDisguise.revealName(player);
