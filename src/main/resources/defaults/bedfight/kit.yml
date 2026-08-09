@@ -2,7 +2,9 @@
 # mundo recebe o mesmo, nao ha escolha de kit).
 #
 # Cada entrada:
-#   item: id do item, no formato "namespace:id" (ex: minecraft:wooden_sword)
+#   item: id do item, no formato "namespace:id" (ex: minecraft:wooden_sword).
+#         "bedfight:team_wool" e um id especial que vira lã azul ou vermelha
+#         dependendo do time do jogador, em vez de uma cor fixa.
 #   count: quantidade
 #   enchantments: opcional, mapa de "namespace:id_do_encantamento": nivel
 
@@ -17,7 +19,7 @@ items:
     count: 1
   - item: minecraft:wooden_sword
     count: 1
-  - item: minecraft:white_wool
+  - item: bedfight:team_wool
     count: 64
   - item: minecraft:shears
     count: 1

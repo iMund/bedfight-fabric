@@ -81,7 +81,11 @@ public final class BedFightCommands {
 					.then(argument("instancia", IntegerArgumentType.integer(0))
 						.executes(BedFightCommands::freeArena)))
 				.then(literal("testkit")
-					.executes(BedFightCommands::testKit))
+					.executes(context -> testKit(context, Team.AZUL))
+					.then(literal("azul")
+						.executes(context -> testKit(context, Team.AZUL)))
+					.then(literal("vermelho")
+						.executes(context -> testKit(context, Team.VERMELHO))))
 				.then(literal("reload")
 					.executes(BedFightCommands::reload))
 				.then(literal("buildzone")
@@ -197,9 +201,9 @@ public final class BedFightCommands {
 		return 1;
 	}
 
-	private static int testKit(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+	private static int testKit(CommandContext<CommandSourceStack> context, Team team) throws CommandSyntaxException {
 		ServerPlayer player = context.getSource().getPlayerOrException();
-		KitService.Result result = KitService.giveKit(player);
+		KitService.Result result = KitService.giveKit(player, team);
 		if (!result.isComplete()) {
 			context.getSource().sendFailure(Component.literal("Kit entregue com problemas: " + String.join("; ", result.failures())).withStyle(ChatFormatting.RED));
 			return result.given();

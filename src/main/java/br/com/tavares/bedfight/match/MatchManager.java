@@ -31,6 +31,7 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.GameType;
 import net.minecraft.world.entity.ai.attributes.Attribute;
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
@@ -167,6 +168,7 @@ public final class MatchManager {
 
 		ArenaSpawn s = spawn.get();
 		player.teleportTo(arenaLevel, s.x(), s.y(), s.z(), Set.of(), s.yaw(), s.pitch(), false);
+		resetPlayerState(player);
 
 		if (match.isFull()) {
 			startCountdown(match);
@@ -185,7 +187,7 @@ public final class MatchManager {
 				BedFight.LOGGER.warn("Jogador {} sumiu da lista antes do kit/congelamento da partida.", playerId);
 				continue;
 			}
-			KitService.Result kitResult = KitService.giveKit(player);
+			KitService.Result kitResult = KitService.giveKit(player, match.teamOf(playerId));
 			if (!kitResult.isComplete()) {
 				BedFight.LOGGER.warn("Kit incompleto pra {} no inicio da partida: {}", playerId, kitResult.failures());
 			}
@@ -218,6 +220,12 @@ public final class MatchManager {
 				player.sendSystemMessage(Component.literal("Um jogador saiu, esperando completar de novo...").withStyle(ChatFormatting.YELLOW));
 			}
 		}
+	}
+
+	/** Other server systems (lobby protection, speed boosts) leave their state on the player when they're pulled into the arena mid-dimension-change - force a clean slate rather than relying on those systems noticing they've left. */
+	private static void resetPlayerState(ServerPlayer player) {
+		player.setGameMode(GameType.SURVIVAL);
+		player.removeAllEffects();
 	}
 
 	private static void freeze(ServerPlayer player) {

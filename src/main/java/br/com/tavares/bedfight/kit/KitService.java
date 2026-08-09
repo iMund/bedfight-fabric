@@ -1,6 +1,6 @@
 package br.com.tavares.bedfight.kit;
 
-import br.com.tavares.bedfight.BedFight;
+import br.com.tavares.bedfight.arena.Team;
 import br.com.tavares.bedfight.config.KitConfig;
 import br.com.tavares.bedfight.config.KitItem;
 import java.util.ArrayList;
@@ -31,8 +31,10 @@ public final class KitService {
 	private KitService() {
 	}
 
-	/** Clears the player's inventory (including crafting grid and cursor) and gives the fixed kit from kit.yml. */
-	public static Result giveKit(ServerPlayer player) {
+	private static final String TEAM_WOOL_ID = "bedfight:team_wool";
+
+	/** Clears the player's inventory (including crafting grid and cursor) and gives the fixed kit from kit.yml, team-only items (team_wool) resolved to that team's color. Pass null team to get a neutral kit (e.g. an admin test command with no match context) - team_wool falls back to white in that case. */
+	public static Result giveKit(ServerPlayer player, Team team) {
 		player.getInventory().clearContent();
 		player.inventoryMenu.getCraftSlots().clearContent();
 		player.containerMenu.setCarried(ItemStack.EMPTY);
@@ -47,7 +49,7 @@ public final class KitService {
 		boolean[] armorFilled = new boolean[EquipmentSlot.values().length];
 		RegistryAccess registryAccess = player.registryAccess();
 		for (KitItem kitItem : items) {
-			ItemStack stack = createStack(kitItem, registryAccess, failures);
+			ItemStack stack = createStack(kitItem, team, registryAccess, failures);
 			if (stack == null) {
 				continue;
 			}
@@ -61,9 +63,14 @@ public final class KitService {
 		return new Result(given, failures);
 	}
 
-	private static ItemStack createStack(KitItem kitItem, RegistryAccess registryAccess, List<String> failures) {
-		Identifier id = Identifier.tryParse(kitItem.item);
-		Item item = id != null ? BuiltInRegistries.ITEM.getValue(id) : Items.AIR;
+	private static ItemStack createStack(KitItem kitItem, Team team, RegistryAccess registryAccess, List<String> failures) {
+		Item item;
+		if (TEAM_WOOL_ID.equals(kitItem.item)) {
+			item = team == Team.VERMELHO ? Items.WOOL.red() : Items.WOOL.blue();
+		} else {
+			Identifier id = Identifier.tryParse(kitItem.item);
+			item = id != null ? BuiltInRegistries.ITEM.getValue(id) : Items.AIR;
+		}
 		if (item == Items.AIR) {
 			failures.add("item de kit desconhecido: " + kitItem.item);
 			return null;
