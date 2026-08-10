@@ -11,6 +11,7 @@ import br.com.tavares.bedfight.arena.MapRegistry;
 import br.com.tavares.bedfight.arena.Team;
 import br.com.tavares.bedfight.config.MatchConfig;
 import br.com.tavares.bedfight.kit.KitService;
+import br.com.tavares.bedfight.mixin.ServerCommonPacketListenerImplAccessor;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.EnumMap;
@@ -30,6 +31,7 @@ import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
+import net.minecraft.network.Connection;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundSetTitleTextPacket;
 import net.minecraft.network.protocol.game.ClientboundSetTitlesAnimationPacket;
@@ -777,7 +779,7 @@ public final class MatchManager {
 	private static List<Component> sidebarLines(Match match, ServerPlayer viewer) {
 		UUID viewerId = viewer.getUUID();
 		List<Component> lines = new ArrayList<>();
-		lines.add(Component.literal(viewer.getGameProfile().name()).withStyle(ChatFormatting.GRAY));
+		lines.add(Component.literal(match.code).withStyle(ChatFormatting.GRAY));
 		lines.add(Component.empty());
 		if (match.state == Match.State.WAITING_FOR_PLAYERS || match.state == Match.State.COUNTDOWN) {
 			lines.add(Component.literal("Mapa: " + match.mapId).withStyle(ChatFormatting.GRAY));
@@ -804,9 +806,20 @@ public final class MatchManager {
 			lines.add(Component.literal("Winstreak: " + PlayerStatsService.winstreakOf(viewerId)).withStyle(ChatFormatting.GRAY));
 		}
 		lines.add(Component.empty());
-		lines.add(Component.literal("UB").withStyle(ChatFormatting.YELLOW, ChatFormatting.BOLD)
-			.append(Component.literal("MC").withStyle(ChatFormatting.RED, ChatFormatting.BOLD)));
+		lines.add(Component.literal(serverAddress(viewer)).withStyle(ChatFormatting.GREEN));
 		return lines;
+	}
+
+	/**
+	 * The literal address the player's client used to connect (captured at handshake). If that was
+	 * somehow never recorded, this must NOT fall back to Connection.getRemoteAddress() - on a
+	 * server-side connection that's the *client's* own address, not the server's, so a missed
+	 * capture would show a player their own IP labeled as if it were the server's.
+	 */
+	private static String serverAddress(ServerPlayer player) {
+		Connection connection = ((ServerCommonPacketListenerImplAccessor) player.connection).bedfight$getConnection();
+		BedFightConnectionHosts.HostInfo hostInfo = BedFightConnectionHosts.get(connection);
+		return hostInfo != null && !hostInfo.hostName().isBlank() ? hostInfo.hostName() : "";
 	}
 
 	private static String capitalize(String value) {

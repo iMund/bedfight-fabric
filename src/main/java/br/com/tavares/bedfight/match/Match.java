@@ -8,6 +8,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
 import net.minecraft.server.level.ServerLevel;
@@ -21,10 +22,16 @@ final class Match {
 		ENDED
 	}
 
+	private static final String CODE_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789";
+	private static final int CODE_LENGTH = 6;
+	private static final Random CODE_RANDOM = new Random();
+
 	final GameMode mode;
 	final ArenaInstance instance;
 	final String mapId;
 	final ServerLevel arenaLevel;
+	/** Short display id shown on the sidebar instead of a player's real name. */
+	final String code = generateCode();
 	final Map<Team, List<UUID>> rosters = new EnumMap<>(Team.class);
 	final Map<Team, Boolean> bedAlive = new EnumMap<>(Team.class);
 	/** Players who died after their team's bed was already destroyed - out for the rest of this match. */
@@ -98,5 +105,13 @@ final class Match {
 
 	Team otherTeam(Team team) {
 		return team == Team.AZUL ? Team.VERMELHO : Team.AZUL;
+	}
+
+	private static String generateCode() {
+		StringBuilder builder = new StringBuilder(CODE_LENGTH);
+		for (int i = 0; i < CODE_LENGTH; i++) {
+			builder.append(CODE_ALPHABET.charAt(CODE_RANDOM.nextInt(CODE_ALPHABET.length())));
+		}
+		return builder.toString();
 	}
 }

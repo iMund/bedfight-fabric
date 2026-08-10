@@ -4,7 +4,9 @@
 	"compatibilityLevel": "JAVA_25",
 	"mixins": [
 		"BlockPlaceTrackingMixin",
-		"OldPvpAttackStrengthMixin"
+		"OldPvpAttackStrengthMixin",
+		"ServerCommonPacketListenerImplAccessor",
+		"ServerHandshakeHostCaptureMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1
