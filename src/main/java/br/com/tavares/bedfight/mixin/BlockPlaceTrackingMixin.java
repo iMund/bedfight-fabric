@@ -1,6 +1,5 @@
 package br.com.tavares.bedfight.mixin;
 
-import br.com.tavares.bedfight.arena.ArenaDimension;
 import br.com.tavares.bedfight.arena.ArenaInstance;
 import br.com.tavares.bedfight.arena.ArenaInstancePool;
 import net.minecraft.server.level.ServerLevel;
@@ -27,10 +26,10 @@ public abstract class BlockPlaceTrackingMixin {
 			return;
 		}
 		Level level = context.getLevel();
-		if (!(level instanceof ServerLevel serverLevel) || serverLevel.dimension() != ArenaDimension.KEY) {
+		if (!(level instanceof ServerLevel serverLevel)) {
 			return;
 		}
-		ArenaInstancePool.findByPosition(context.getClickedPos())
+		ArenaInstancePool.findByDimension(serverLevel.dimension())
 			.filter(ArenaInstance::isInUse)
 			.ifPresent(instance -> instance.markPlaced(context.getClickedPos()));
 	}

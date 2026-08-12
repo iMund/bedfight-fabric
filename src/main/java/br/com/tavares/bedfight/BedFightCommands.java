@@ -44,10 +44,10 @@ public final class BedFightCommands {
 	private static final SimpleCommandExceptionType INVALID_MAP_ID = new SimpleCommandExceptionType(
 		Component.literal("mapId invalido - use so letras minusculas, numeros, '-' e '_' (1 a 32 caracteres)."));
 	/**
-	 * Well outside any instance grid slot (instances only ever sit at x = index * gridSpacingBlocks,
-	 * always >= 0, z = 0) - a safe place to build/capture a map without ever touching survival or
-	 * overlapping a live match. Numbered so each map gets its own spot instead of every build landing
-	 * on top of the last one - zone N is 500 blocks further along Z than zone N-1.
+	 * Coordinates inside the dedicated bedfight:build dimension, which no live match ever uses -
+	 * a safe place to build/capture a map without ever touching survival or overlapping a match.
+	 * Numbered so each map gets its own spot instead of every build landing on top of the last one -
+	 * zone N is 500 blocks further along Z than zone N-1.
 	 */
 	private static final int BUILD_ZONE_BASE_X = -2000;
 	private static final int BUILD_ZONE_Y = 100;
@@ -151,20 +151,20 @@ public final class BedFightCommands {
 		String mapId = requireValidMapId(context);
 		int index = IntegerArgumentType.getInteger(context, "instancia");
 
-		ServerLevel arenaLevel = ArenaDimension.get(context.getSource().getServer());
-		if (arenaLevel == null) {
-			context.getSource().sendFailure(Component.literal("Dimensao bedfight:arena nao carregou.").withStyle(ChatFormatting.RED));
-			return 0;
-		}
 		Optional<ArenaInstance> instance = ArenaInstancePool.byIndex(index);
 		if (instance.isEmpty()) {
 			context.getSource().sendFailure(Component.literal("Instancia " + index + " nao existe (pool tem " + ArenaInstancePool.all().size() + ").").withStyle(ChatFormatting.RED));
 			return 0;
 		}
+		ServerLevel arenaLevel = instance.get().level(context.getSource().getServer());
+		if (arenaLevel == null) {
+			context.getSource().sendFailure(Component.literal("Dimensao " + instance.get().dimensionKey().identifier() + " nao carregou.").withStyle(ChatFormatting.RED));
+			return 0;
+		}
 
 		BedProtectionScanner.Result scan;
 		try {
-			scan = ArenaInstanceService.paste(arenaLevel, instance.get(), mapId);
+			scan = ArenaInstanceService.paste(instance.get(), mapId, context.getSource().getServer());
 		} catch (MapCaptureException exception) {
 			context.getSource().sendFailure(Component.literal(exception.getMessage()).withStyle(ChatFormatting.RED));
 			return 0;
@@ -190,6 +190,10 @@ public final class BedFightCommands {
 		Optional<ArenaInstance> instance = ArenaInstancePool.byIndex(index);
 		if (instance.isEmpty()) {
 			context.getSource().sendFailure(Component.literal("Instancia " + index + " nao existe.").withStyle(ChatFormatting.RED));
+			return 0;
+		}
+		if (MatchManager.hasActiveMatch(instance.get())) {
+			context.getSource().sendFailure(Component.literal("Instancia " + index + " tem uma partida em andamento - espere terminar antes de liberar.").withStyle(ChatFormatting.RED));
 			return 0;
 		}
 		ArenaInstanceService.free(instance.get());
@@ -222,13 +226,13 @@ public final class BedFightCommands {
 		return 1;
 	}
 
-	/** Teleports the admin to build zone number "area" inside bedfight:arena - each number is its own isolated platform, 500 blocks apart, so building map 2 never lands on top of map 1. Build the map "molde" here instead of the survival overworld, then select/setspawn/capturar from here same as always. */
+	/** Teleports the admin to build zone number "area" inside the dedicated bedfight:build dimension (never a live match instance) - each number is its own isolated platform, 500 blocks apart, so building map 2 never lands on top of map 1. Build the map "molde" here instead of the survival overworld, then select/setspawn/capturar from here same as always. */
 	private static int buildZone(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
 		ServerPlayer player = context.getSource().getPlayerOrException();
 		int area = IntegerArgumentType.getInteger(context, "area");
-		ServerLevel arenaLevel = ArenaDimension.get(context.getSource().getServer());
+		ServerLevel arenaLevel = ArenaDimension.get(context.getSource().getServer(), ArenaDimension.BUILD);
 		if (arenaLevel == null) {
-			context.getSource().sendFailure(Component.literal("Dimensao bedfight:arena nao carregou.").withStyle(ChatFormatting.RED));
+			context.getSource().sendFailure(Component.literal("Dimensao bedfight:build nao carregou.").withStyle(ChatFormatting.RED));
 			return 0;
 		}
 		BlockPos origin = new BlockPos(BUILD_ZONE_BASE_X, BUILD_ZONE_Y, area * BUILD_ZONE_SPACING);

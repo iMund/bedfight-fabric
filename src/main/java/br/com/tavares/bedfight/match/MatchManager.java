@@ -1,7 +1,6 @@
 package br.com.tavares.bedfight.match;
 
 import br.com.tavares.bedfight.BedFight;
-import br.com.tavares.bedfight.arena.ArenaDimension;
 import br.com.tavares.bedfight.arena.ArenaInstance;
 import br.com.tavares.bedfight.arena.ArenaInstancePool;
 import br.com.tavares.bedfight.arena.ArenaInstanceService;
@@ -170,21 +169,25 @@ public final class MatchManager {
 		return MATCHES.size();
 	}
 
+	/** Whether this specific instance currently belongs to a forming/running match - freearena guards on this so an admin can't yank the arena out from under players who are still in it. */
+	public static boolean hasActiveMatch(ArenaInstance instance) {
+		return findMatchByInstance(instance) != null;
+	}
+
 	private static ReturnLocation captureReturnLocation(ServerPlayer player) {
 		return new ReturnLocation(player.level().dimension(), player.getX(), player.getY(), player.getZ(), player.getYRot(), player.getXRot());
 	}
 
 	private static JoinResult attemptPlacement(ServerPlayer player, GameMode mode, MinecraftServer server) {
-		ServerLevel arenaLevel = ArenaDimension.get(server);
-		if (arenaLevel == null) {
-			return new JoinResult(false, false, "Dimensao bedfight:arena nao carregou.");
-		}
-
 		Match match = findFormingMatch(mode);
 		if (match == null) {
 			Optional<ArenaInstance> instance = ArenaInstancePool.findFree();
 			if (instance.isEmpty()) {
 				return new JoinResult(false, true, "Todas as arenas estao ocupadas, voce esta na fila de " + mode.id() + ".");
+			}
+			ServerLevel arenaLevel = instance.get().level(server);
+			if (arenaLevel == null) {
+				return new JoinResult(false, false, "Dimensao " + instance.get().dimensionKey().identifier() + " nao carregou.");
 			}
 			List<String> maps = MapRegistry.listPlayableMapIds();
 			if (maps.isEmpty()) {
@@ -192,7 +195,7 @@ public final class MatchManager {
 			}
 			String mapId = maps.get(RANDOM.nextInt(maps.size()));
 			try {
-				ArenaInstanceService.paste(arenaLevel, instance.get(), mapId);
+				ArenaInstanceService.paste(instance.get(), mapId, server);
 			} catch (MapCaptureException exception) {
 				return new JoinResult(false, false, exception.getMessage());
 			} catch (IOException exception) {
@@ -219,7 +222,7 @@ public final class MatchManager {
 		QUEUES.get(mode).leave(playerId);
 
 		ArenaSpawn s = spawn.get();
-		player.teleportTo(arenaLevel, s.x(), s.y(), s.z(), Set.of(), s.yaw(), s.pitch(), false);
+		player.teleportTo(match.arenaLevel, s.x(), s.y(), s.z(), Set.of(), s.yaw(), s.pitch(), false);
 		resetPlayerState(player);
 		BedFightDisguise.hideName(player);
 		refreshSidebar(match);
@@ -547,7 +550,7 @@ public final class MatchManager {
 
 	/** ArenaBlockProtection marks every bed block breakable for anyone (it doesn't know about teams) - this denies breaking your own team's bed specifically, so the only way to lose a bed is the enemy destroying it. */
 	private static boolean onBeforeBedBreak(Level level, Player player, BlockPos pos, BlockState state, BlockEntity blockEntity) {
-		if (!(level instanceof ServerLevel serverLevel) || serverLevel.dimension() != ArenaDimension.KEY || !(player instanceof ServerPlayer serverPlayer)) {
+		if (!(level instanceof ServerLevel serverLevel) || !(player instanceof ServerPlayer serverPlayer)) {
 			return true;
 		}
 		Match match = PLAYER_MATCH.get(serverPlayer.getUUID());
@@ -555,17 +558,17 @@ public final class MatchManager {
 			return true;
 		}
 		Team breakerTeam = match.teamOf(serverPlayer.getUUID());
-		return ArenaInstancePool.findByPosition(pos)
+		return ArenaInstancePool.findByDimension(serverLevel.dimension())
 			.flatMap(instance -> instance.teamOfBedBlock(pos))
 			.map(bedTeam -> bedTeam != breakerTeam)
 			.orElse(true);
 	}
 
 	private static void onBedBreakAfter(Level level, Player player, BlockPos pos, BlockState state, BlockEntity blockEntity) {
-		if (!(level instanceof ServerLevel serverLevel) || serverLevel.dimension() != ArenaDimension.KEY) {
+		if (!(level instanceof ServerLevel serverLevel)) {
 			return;
 		}
-		ArenaInstancePool.findByPosition(pos).ifPresent(instance -> {
+		ArenaInstancePool.findByDimension(serverLevel.dimension()).ifPresent(instance -> {
 			if (instance.isInUse() && instance.teamOfBedBlock(pos).isPresent()) {
 				// AFTER fires before vanilla's own Block.playerDestroy actually spawns the drop
 				// (same tick, but earlier in the same method) - the item entity doesn't exist yet,

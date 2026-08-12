@@ -1,13 +1,14 @@
 package br.com.tavares.bedfight.arena;
 
 import br.com.tavares.bedfight.BedFight;
-import br.com.tavares.bedfight.config.ArenaConfig;
 import br.com.tavares.bedfight.config.YamlConfigLoader;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -17,7 +18,10 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtAccounter;
 import net.minecraft.nbt.NbtIo;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructurePlaceSettings;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate;
@@ -30,8 +34,18 @@ public final class ArenaInstanceService {
 	private ArenaInstanceService() {
 	}
 
-	/** Pastes a map's captured structure at the instance's origin, overwriting whatever was there before - this doubles as the reset between matches. */
-	public static BedProtectionScanner.Result paste(ServerLevel arenaLevel, ArenaInstance instance, String mapId) throws IOException, MapCaptureException {
+	/**
+	 * Pastes a map's captured structure into the instance's own dimension, overwriting whatever was
+	 * there before - this doubles as the reset between matches. Also clears every non-player entity
+	 * in that dimension (drops, arrows, thrown items) - safe now that each instance owns its whole
+	 * dimension, nothing else could ever legitimately be in there.
+	 */
+	public static BedProtectionScanner.Result paste(ArenaInstance instance, String mapId, MinecraftServer server) throws IOException, MapCaptureException {
+		ServerLevel arenaLevel = instance.level(server);
+		if (arenaLevel == null) {
+			throw new IOException("Dimensao " + instance.dimensionKey().identifier() + " nao carregou.");
+		}
+
 		Path structureFile = MapCaptureService.mapDir(mapId).resolve("structure.nbt");
 		if (!Files.exists(structureFile)) {
 			throw new IOException("Mapa " + mapId + " nao tem structure.nbt capturado.");
@@ -41,17 +55,17 @@ public final class ArenaInstanceService {
 		template.load(arenaLevel.registryAccess().lookupOrThrow(Registries.BLOCK), tag);
 
 		Vec3i size = template.getSize();
-		int gridSpacing = ArenaConfig.get().gridSpacingBlocks;
-		if (size.getX() > gridSpacing || size.getZ() > gridSpacing) {
-			throw new MapCaptureException("Mapa " + mapId + " (" + size.getX() + "x" + size.getZ()
-				+ ") e maior que o espacamento do grid (" + gridSpacing + "), instancias vizinhas se sobrepoem.");
-		}
 		if (instance.origin().getY() + size.getY() > ARENA_HEIGHT) {
 			throw new MapCaptureException("Mapa " + mapId + " e alto demais (" + size.getY() + " blocos) pra dimensao da arena.");
 		}
 
 		StructurePlaceSettings settings = new StructurePlaceSettings().setKnownShape(true);
 		template.placeInWorld(arenaLevel, instance.origin(), instance.origin(), settings, arenaLevel.getRandom(), PASTE_FLAGS);
+		// Entity lookup only sees loaded chunks - an idle instance between matches has none loaded
+		// (nobody's standing in it), so this has to run after placeInWorld forces the paste area's
+		// chunks to load, not before, or it silently finds nothing and the previous match's dropped
+		// loot/arrows come right back.
+		clearNonPlayerEntities(arenaLevel);
 
 		BedProtectionScanner.Result scan = BedProtectionScanner.scan(arenaLevel, instance.origin(), size);
 		instance.occupy(mapId, scan.breakableBlocks());
@@ -63,6 +77,16 @@ public final class ArenaInstanceService {
 			}
 		}
 		return scan;
+	}
+
+	private static void clearNonPlayerEntities(ServerLevel level) {
+		List<Entity> toRemove = new ArrayList<>();
+		for (Entity entity : level.getAllEntities()) {
+			if (!(entity instanceof Player)) {
+				toRemove.add(entity);
+			}
+		}
+		toRemove.forEach(Entity::discard);
 	}
 
 	/** Assigns each physical bed (a connected pair of bed blocks) to whichever team's spawn it's closest to. */

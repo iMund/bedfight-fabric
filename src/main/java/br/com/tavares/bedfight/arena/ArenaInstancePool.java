@@ -5,14 +5,13 @@ import br.com.tavares.bedfight.config.ArenaConfig;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import net.minecraft.core.BlockPos;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.level.Level;
 
 public final class ArenaInstancePool {
-	private static final int INSTANCE_Y = 64;
-	private static final int MIN_GRID_SPACING = 256;
-	private static final int MAX_POOL_SIZE = 64;
+	/** How many bedfight:arena_N dimensions actually exist as datapack JSON (see data/bedfight/dimension) - the hard ceiling on how many instances can ever be pooled, since Fabric/vanilla dimensions are fixed at server start, not created on demand. */
+	private static final int MAX_POOL_SIZE = 16;
 	private static List<ArenaInstance> instances = List.of();
-	private static int gridSpacing = MIN_GRID_SPACING;
 
 	private ArenaInstancePool() {
 	}
@@ -20,16 +19,14 @@ public final class ArenaInstancePool {
 	public static void init() {
 		ArenaConfig config = ArenaConfig.get();
 		int poolSize = Math.clamp(config.instancePoolSize, 1, MAX_POOL_SIZE);
-		int spacing = Math.max(config.gridSpacingBlocks, MIN_GRID_SPACING);
-		if (poolSize != config.instancePoolSize || spacing != config.gridSpacingBlocks) {
-			BedFight.LOGGER.warn("arena.yml tinha instancePoolSize={} gridSpacingBlocks={} fora do intervalo aceito, usando {}/{}.",
-				config.instancePoolSize, config.gridSpacingBlocks, poolSize, spacing);
+		if (poolSize != config.instancePoolSize) {
+			BedFight.LOGGER.warn("arena.yml tinha instancePoolSize={} fora do intervalo aceito (1-{}), usando {}.",
+				config.instancePoolSize, MAX_POOL_SIZE, poolSize);
 		}
-		gridSpacing = spacing;
 
 		List<ArenaInstance> built = new ArrayList<>(poolSize);
 		for (int i = 0; i < poolSize; i++) {
-			built.add(new ArenaInstance(i, new BlockPos(i * spacing, INSTANCE_Y, 0)));
+			built.add(new ArenaInstance(i, ArenaDimension.arenaKey(i)));
 		}
 		instances = built;
 	}
@@ -39,15 +36,45 @@ public final class ArenaInstancePool {
 	}
 
 	public static Optional<ArenaInstance> findFree() {
-		return instances.stream().filter(instance -> !instance.isInUse()).findFirst();
+		for (ArenaInstance instance : instances) {
+			if (!instance.isInUse()) {
+				return Optional.of(instance);
+			}
+		}
+		return Optional.empty();
 	}
 
 	public static Optional<ArenaInstance> byIndex(int index) {
-		return instances.stream().filter(instance -> instance.index() == index).findFirst();
+		for (ArenaInstance instance : instances) {
+			if (instance.index() == index) {
+				return Optional.of(instance);
+			}
+		}
+		return Optional.empty();
 	}
 
-	/** Which instance's grid cell a position falls in - every instance occupies the same fixed-width X slice, so this is exact as long as maps are validated to fit within gridSpacingBlocks (see ArenaInstanceService.paste). */
-	public static Optional<ArenaInstance> findByPosition(BlockPos pos) {
-		return byIndex(Math.floorDiv(pos.getX(), gridSpacing));
+	/**
+	 * Which instance owns this dimension, if any - now that each instance is its own dimension, this
+	 * is the same question as "which instance is this block/player in". Called on every block
+	 * break/place server-wide (not just inside an arena), so this is a plain loop rather than a
+	 * Stream pipeline - the instance count is small (at most MAX_POOL_SIZE) but this runs constantly.
+	 */
+	public static Optional<ArenaInstance> findByDimension(ResourceKey<Level> dimensionKey) {
+		for (ArenaInstance instance : instances) {
+			if (instance.dimensionKey() == dimensionKey) {
+				return Optional.of(instance);
+			}
+		}
+		return Optional.empty();
+	}
+
+	/** Cheap membership check for hot paths (mixins) that only need to know "are we in any arena instance", not which one. */
+	public static boolean isAnyArenaInstance(ResourceKey<Level> dimensionKey) {
+		for (ArenaInstance instance : instances) {
+			if (instance.dimensionKey() == dimensionKey) {
+				return true;
+			}
+		}
+		return false;
 	}
 }

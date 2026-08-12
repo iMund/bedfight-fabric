@@ -1,13 +1,10 @@
 # Configuracao das instancias de arena do Bed Fight.
-# A dimensao dedicada em si (bedfight:arena) nao e configuravel aqui - e um
-# datapack embutido no mod (data/bedfight/dimension/arena.json).
+# Cada instancia e a sua propria dimensao dedicada (bedfight:arena_0, arena_1,
+# ...), nao configuravel aqui - sao datapacks embutidos no mod
+# (data/bedfight/dimension/arena_N.json). Tem 16 registradas; aumentar o pool
+# alem disso exige adicionar mais um desses arquivos.
 
-# Quantas partidas podem rodar ao mesmo tempo, cada uma na sua propria instancia.
-# Se todas estiverem ocupadas quando uma fila enche, os jogadores continuam
-# esperando na fila ate uma instancia liberar.
+# Quantas partidas podem rodar ao mesmo tempo, cada uma na sua propria instancia
+# (dimensao) isolada. Se todas estiverem ocupadas quando uma fila enche, os
+# jogadores continuam esperando na fila ate uma instancia liberar.
 instancePoolSize: 4
-
-# Distancia em blocos entre uma instancia e outra dentro do grid da dimensao.
-# Precisa ser maior que o tamanho do maior mapa cadastrado, senao uma instancia
-# pode invadir a area da vizinha.
-gridSpacingBlocks: 1000

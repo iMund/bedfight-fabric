@@ -1,6 +1,7 @@
 package br.com.tavares.bedfight.arena;
 
 import br.com.tavares.bedfight.BedFightPermissions;
+import java.util.Optional;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
@@ -10,7 +11,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 
-/** Inside the arena dimension, only a match's bed/wood/end-stone shell and player-placed blocks are breakable. */
+/** Inside an arena instance's dimension, only a match's bed/wood/end-stone shell and player-placed blocks are breakable. */
 public final class ArenaBlockProtection {
 	private ArenaBlockProtection() {
 	}
@@ -20,14 +21,16 @@ public final class ArenaBlockProtection {
 	}
 
 	private static boolean onBeforeBreak(Level level, Player player, BlockPos pos, BlockState state, BlockEntity blockEntity) {
-		if (!(level instanceof ServerLevel serverLevel) || serverLevel.dimension() != ArenaDimension.KEY) {
+		if (!(level instanceof ServerLevel serverLevel)) {
+			return true;
+		}
+		Optional<ArenaInstance> instance = ArenaInstancePool.findByDimension(serverLevel.dimension());
+		if (instance.isEmpty()) {
 			return true;
 		}
 		if (player.isCreative() || (player instanceof ServerPlayer serverPlayer && BedFightPermissions.hasAdminPermission(serverPlayer.permissions()))) {
 			return true;
 		}
-		return ArenaInstancePool.findByPosition(pos)
-			.map(instance -> instance.isInUse() && instance.isBreakable(pos))
-			.orElse(false);
+		return instance.get().isInUse() && instance.get().isBreakable(pos);
 	}
 }
